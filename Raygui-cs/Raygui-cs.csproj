@@ -1,0 +1,21 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Raylib-CsLo" Version="4.2.0.4" PrivateAssets="compile" /> <!--PrivateAssets="compile"--> 
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Raylib-cs">
+      <HintPath>..\..\..\..\.nuget\packages\raylib-cs\4.2.0.1\lib\net6.0\Raylib-cs.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>
+  
