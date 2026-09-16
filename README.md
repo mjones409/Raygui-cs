@@ -100,6 +100,50 @@ raygui is an immediate mode library: you call each control every frame, pass in 
 - **Text length limits are in UTF-8 bytes** and don't include the null terminator (`maxByteCount`).
 - **Invalid arguments throw** instead of reaching raygui, which doesn't check its inputs. For example, an out of range style property or icon throws `ArgumentOutOfRangeException`, and a missing style file throws `FileNotFoundException`.
 
+## File and folder dialogs
+
+raygui has no file dialog, so Raygui-cs includes one written in C# on top of raygui controls. `OpenFileDialog`, `SaveFileDialog` and `FolderBrowserDialog` follow the WinForms classes of the same names. They have the same properties (`Filter`, `FilterIndex`, `InitialDirectory`, `FileName(s)`, `Multiselect`, `DefaultExt`, `AddExtension`, `CheckFileExists`, `OverwritePrompt`, `CreatePrompt`, `ShowReadOnly`, `ShowHiddenFiles`, `ShowPinnedPlaces`, `CustomPlaces`, `ClientGuid`, `OkRequiresInteraction`, `SelectedPath(s)`, `Description`, `ShowNewFolderButton`, ...) and events (`FileOk`, `HelpRequest`). They draw in the current raygui style and work on Windows, Linux and macOS.
+
+The dialog window can be moved and resized. It has back, forward, up and refresh buttons, an editable address bar, search, a hidden files toggle and a new folder button. The file list can be sorted by column. The places list shows known folders, custom places and drives. The dialogs also have filter and read-only controls, confirmation prompts and keyboard support: arrows, Enter, Backspace, Alt+arrows, Ctrl+A, Ctrl+L, Ctrl+F, Ctrl+H, F5, Ctrl+Shift+N, type-ahead and Escape.
+
+**Blocking**, like WinForms. `ShowDialog` runs its own frame loop until the dialog closes, so it can be called from a button handler:
+
+```csharp
+var dialog = new OpenFileDialog { Filter = "Images (*.png, *.jpg)|*.png;*.jpg|All files (*.*)|*.*", Multiselect = true };
+if (Gui.Button(bounds, "Open...") && dialog.ShowDialog(DrawMyUi) == DialogResult.OK)
+{
+    Load(dialog.FileNames);
+}
+```
+
+`DrawMyUi` is optional. It redraws your UI behind the dialog each frame, with the gui locked.
+
+**Non-blocking.** Open the dialog, then call `Draw` every frame after the rest of your UI:
+
+```csharp
+var folderDialog = new FolderBrowserDialog { Description = "Select the source folder" };
+Raylib.SetExitKey(KeyboardKey.Null); // otherwise Escape also closes the window
+
+while (!Raylib.WindowShouldClose())
+{
+    Raylib.BeginDrawing();
+    Gui.IsLocked = folderDialog.IsBlockingInput;
+    if (Gui.Button(new Rectangle(10, 10, 120, 30), "Browse..."))
+    {
+        folderDialog.Open();
+    }
+    Gui.IsLocked = false;
+
+    if (folderDialog.Draw() == DialogResult.OK)
+    {
+        source = folderDialog.SelectedPath;
+    }
+    Raylib.EndDrawing();
+}
+```
+
+Differences from WinForms: `.lnk` shortcuts aren't resolved (symbolic links are), `RestoreDirectory` only restores a current directory changed by your own `FileOk` handler, `ClientGuid` remembers the last folder only for the lifetime of the process, and `AddToRecent` and `AutoUpgradeEnabled` don't exist.
+
 ## Migrating from earlier versions
 
 Earlier versions of Raygui-cs wrapped raygui 3.x through Raylib-CsLo, using raygui's C function names.

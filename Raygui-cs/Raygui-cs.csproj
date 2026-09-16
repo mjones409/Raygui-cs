@@ -7,21 +7,42 @@
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
   </PropertyGroup>
 
+  <!-- Local NuGet package: `dotnet pack -c Release` writes it to ..\nupkg.
+       Not "Raygui-cs", which is an unrelated package on nuget.org. -->
+  <PropertyGroup>
+    <PackageId>Raygui-cs.Local</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>mjones409</Authors>
+    <Description>raygui 5.0 bindings for Raylib-cs, including the native win-x64 raygui library.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)..\nupkg</PackageOutputPath>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Raylib-cs" Version="8.1.0" />
   </ItemGroup>
 
-  <!-- Native raygui library, built by .github/workflows/build-raygui.yml. Copied next to any app that references this project. -->
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+  <!-- Native raygui library, built by .github/workflows/build-raygui.yml.
+       Packed under runtimes/win-x64/native, and copied next to apps that reference this project directly. -->
   <PropertyGroup>
     <RayguiNativeDll>$(MSBuildThisFileDirectory)runtimes\win-x64\native\raygui.dll</RayguiNativeDll>
   </PropertyGroup>
 
   <ItemGroup Condition="Exists('$(RayguiNativeDll)')">
-    <None Include="$(RayguiNativeDll)" Link="raygui.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="$(RayguiNativeDll)" Link="raygui.dll" CopyToOutputDirectory="PreserveNewest" Visible="false"
+          Pack="true" PackagePath="runtimes\win-x64\native\" />
   </ItemGroup>
 
   <Target Name="WarnMissingRayguiNativeDll" BeforeTargets="Build" Condition="!Exists('$(RayguiNativeDll)')">
     <Warning Text="raygui.dll not found at $(RayguiNativeDll). Run the 'Build raygui.dll' GitHub Actions workflow and commit its output there, or GUI calls will throw DllNotFoundException." />
+  </Target>
+
+  <Target Name="RequireRayguiNativeDllForPack" BeforeTargets="GenerateNuspec" Condition="!Exists('$(RayguiNativeDll)')">
+    <Error Text="Cannot pack without raygui.dll at $(RayguiNativeDll)." />
   </Target>
 
 </Project>
