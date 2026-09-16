@@ -1,519 +1,728 @@
-﻿using Microsoft.Toolkit.HighPerformance.Buffers;
 using Raylib_cs;
-using Raylib_CsLo.InternalHelpers;
 using System.Numerics;
-using System.Text;
-using static RaylibBindingsConverter;
+using System.Runtime.InteropServices;
+using static RayGui_cs.Utf8Marshal;
 
 namespace RayGui_cs
 {
     public static class Gui
     {
+        // raygui keeps the tooltip pointer, so the string must stay alive until it is replaced.
+        private static IntPtr tooltip;
+
+        // Must match RAYGUI_VALUEBOX_MAX_CHARS in the native build.
+        private const int ValueBoxMaxChars = 32;
+
+        #region Global gui state control functions
+
         [Reviewed]
         public static void GuiEnable()
         {
-            Raylib_CsLo.RayGui.GuiEnable();
+            RayguiNative.GuiEnable();
         }
 
         [Reviewed]
         public static void GuiDisable()
         {
-            Raylib_CsLo.RayGui.GuiDisable();
+            RayguiNative.GuiDisable();
         }
 
         [Reviewed]
         public static void GuiLock()
         {
-            Raylib_CsLo.RayGui.GuiLock();
+            RayguiNative.GuiLock();
         }
 
         [Reviewed]
         public static void GuiUnlock()
         {
-            Raylib_CsLo.RayGui.GuiUnlock();
+            RayguiNative.GuiUnlock();
         }
 
         [Reviewed]
         public static bool GuiIsLocked()
         {
-            return Raylib_CsLo.RayGui.GuiIsLocked();
+            return RayguiNative.GuiIsLocked();
         }
 
-
-        [Reviewed]
-        public static void GuiFade(float alpha)
+        public static void GuiSetAlpha(float alpha)
         {
-            Raylib_CsLo.RayGui.GuiFade(alpha);
+            RayguiNative.GuiSetAlpha(alpha);
         }
 
         [Reviewed]
         public static void GuiSetState(int state)
         {
-            Raylib_CsLo.RayGui.GuiSetState(state);
+            RayguiNative.GuiSetState(state);
         }
 
         [Reviewed]
         public static int GuiGetState()
         {
-            return Raylib_CsLo.RayGui.GuiGetState();
+            return RayguiNative.GuiGetState();
         }
+
+        #endregion
+
+        #region Font and style functions
 
         [Reviewed]
         public static void GuiSetFont(Font font)
         {
-            Raylib_CsLo.RayGui.GuiSetFont(ConvertFont(font));
+            RayguiNative.GuiSetFont(font);
         }
 
         [Reviewed]
         public static Font GuiGetFont()
         {
-            return ConvertFont(Raylib_CsLo.RayGui.GuiGetFont());
+            return RayguiNative.GuiGetFont();
         }
 
         [Reviewed]
         public static void GuiSetStyle(int control, int property, int value)
-
         {
-            Raylib_CsLo.RayGui.GuiSetStyle(control, property, value);
+            RayguiNative.GuiSetStyle(control, property, value);
         }
 
         [Reviewed]
         public static int GuiGetStyle(int control, int property)
         {
-            return Raylib_CsLo.RayGui.GuiGetStyle(control, property);
+            return RayguiNative.GuiGetStyle(control, property);
         }
 
-        [Reviewed]
-        public static void GuiPanel(Rectangle bounds, string? text)
+        public static void GuiLoadStyle(string? fileName)
         {
             unsafe
             {
-                Raylib_CsLo.RayGui.GuiPanel(ConvertRectangle(bounds), ConvertString(text));
-            }
-        }
-
-        [Reviewed]
-        public static Rectangle GuiScrollPanel(Rectangle bounds, string? text, Rectangle content, ref Vector2 scroll)
-        {
-            unsafe
-            {
-                fixed (Vector2* fixedScroll = &scroll)
+                fixed (byte* fileNamePtr = ToUtf8(fileName ?? string.Empty))
                 {
-                    return ConvertRectangle(Raylib_CsLo.RayGui.GuiScrollPanel(ConvertRectangle(bounds), ConvertString(text), ConvertRectangle(content), fixedScroll));
+                    RayguiNative.GuiLoadStyle((sbyte*)fileNamePtr);
                 }
-
             }
         }
 
-        [Reviewed]
-        public static Vector2 GuiGrid(Rectangle bounds, string? text, float spacing, int subdivs)
+        public static void GuiLoadStyleFromMemory(ReadOnlySpan<byte> fileData)
         {
             unsafe
             {
-                return Raylib_CsLo.RayGui.GuiGrid(ConvertRectangle(bounds), ConvertString(text), spacing, subdivs);
-            }
-        }
-
-        [Reviewed]
-        public static Color GuiColorPicker(Rectangle bounds, string? text, Color color)
-        {
-            unsafe
-            {
-                return ConvertColor(Raylib_CsLo.RayGui.GuiColorPicker(ConvertRectangle(bounds), ConvertString(text), ConvertColor(color)));
-            }
-        }
-
-        [Reviewed]
-        public static Color GuiColorPanel(Rectangle bounds, string? text, Color color)
-        {
-            unsafe
-            {
-                return ConvertColor(Raylib_CsLo.RayGui.GuiColorPanel(ConvertRectangle(bounds), ConvertString(text), ConvertColor(color)));
-            }
-        }
-
-        [Reviewed]
-        public static float GuiColorBarAlpha(Rectangle bounds, string? text, float alpha)
-        {
-            unsafe
-            {
-                return Raylib_CsLo.RayGui.GuiColorBarAlpha(ConvertRectangle(bounds), ConvertString(text), alpha);
-            }
-        }
-
-        [Reviewed]
-        public static float GuiColorBarHue(Rectangle bounds, string? text, float value)
-        {
-            unsafe
-            {
-                return Raylib_CsLo.RayGui.GuiColorBarHue(ConvertRectangle(bounds), ConvertString(text), value);
+                fixed (byte* fileDataPtr = fileData)
+                {
+                    RayguiNative.GuiLoadStyleFromMemory(fileDataPtr, fileData.Length);
+                }
             }
         }
 
         [Reviewed]
         public static void GuiLoadStyleDefault()
         {
-            Raylib_CsLo.RayGui.GuiLoadStyleDefault();
+            RayguiNative.GuiLoadStyleDefault();
+        }
+
+        #endregion
+
+        #region Tooltip functions
+
+        public static void GuiEnableTooltip()
+        {
+            RayguiNative.GuiEnableTooltip();
+        }
+
+        public static void GuiDisableTooltip()
+        {
+            RayguiNative.GuiDisableTooltip();
+        }
+
+        public static void GuiSetTooltip(string? text)
+        {
+            IntPtr previous = tooltip;
+            tooltip = text is null ? IntPtr.Zero : Marshal.StringToCoTaskMemUTF8(text);
+            unsafe
+            {
+                RayguiNative.GuiSetTooltip((sbyte*)tooltip);
+            }
+            Marshal.FreeCoTaskMem(previous);
+        }
+
+        #endregion
+
+        #region Icon functions
+
+        public static string GuiIconText(int iconId, string? text)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                {
+                    return FromUtf8(RayguiNative.GuiIconText(iconId, (sbyte*)textPtr));
+                }
+            }
+        }
+
+        public static void GuiSetIconScale(int scale)
+        {
+            RayguiNative.GuiSetIconScale(scale);
+        }
+
+        // GuiGetIcons is intentionally not exposed: it returns a raw pointer into raygui's icon table.
+
+        public static void GuiLoadIcons(string? fileName)
+        {
+            unsafe
+            {
+                fixed (byte* fileNamePtr = ToUtf8(fileName ?? string.Empty))
+                {
+                    RayguiNative.GuiLoadIcons((sbyte*)fileNamePtr, false);
+                }
+            }
+        }
+
+        public static void GuiLoadIconsFromMemory(ReadOnlySpan<byte> fileData)
+        {
+            unsafe
+            {
+                fixed (byte* fileDataPtr = fileData)
+                {
+                    RayguiNative.GuiLoadIconsFromMemory(fileDataPtr, fileData.Length, false);
+                }
+            }
         }
 
         [Reviewed]
         public static void GuiDrawIcon(int iconId, int posX, int posY, int pixelSize, Color color)
         {
-            Raylib_CsLo.RayGui.GuiDrawIcon(iconId, posX, posY, pixelSize, ConvertColor(color));
-        }
-        /*
-       [FailedReview("Returns a memory address.")]
-       public static uint GuiGetIcons()
-       {
-           throw new NotImplementedException();
-           unsafe
-           {
-               return (uint)Raylib_CsLo.RayGui.GuiGetIcons();
-           }
-       }
-
-       [FailedReview("Returns a memory address.")]
-       public static uint GuiGetIconData(int iconId)
-       {
-           throw new NotImplementedException();
-           unsafe
-           {
-               return (uint)Raylib_CsLo.RayGui.GuiGetIconData(iconId);
-           }
-       }
-
-       [FailedReview("Requires a memory address.")]
-       public static void GuiSetIconData(int iconId, uint data)
-       {
-           throw new NotImplementedException();
-           unsafe
-           {
-               Raylib_CsLo.RayGui.GuiSetIconData(iconId, (uint*)data); 
-           }
-       } 
-        */
-        [Reviewed]
-        public static void GuiSetIconScale(uint scale)
-        {
-            Raylib_CsLo.RayGui.GuiSetIconScale(scale);
+            RayguiNative.GuiDrawIcon(iconId, posX, posY, pixelSize, color);
         }
 
-        [Reviewed]
-        public static void GuiSetIconPixel(int iconId, int x, int y)
+        #endregion
+
+        #region Utility functions
+
+        public static int GuiGetTextWidth(string? text)
         {
-            Raylib_CsLo.RayGui.GuiSetIconPixel(iconId, x, y);
-        }
-
-        [Reviewed]
-        public static void GuiClearIconPixel(int iconId, int x, int y)
-        {
-            Raylib_CsLo.RayGui.GuiClearIconPixel(iconId, x, y);
-        }
-
-        [Reviewed]
-        public static bool GuiCheckIconPixel(int iconId, int x, int y)
-
-        {
-            return Raylib_CsLo.RayGui.GuiCheckIconPixel(iconId, x, y);
-        }
-
-        [Reviewed]
-        public static bool GuiWindowBox(Rectangle bounds, string? title)
-        {
-            return Raylib_CsLo.RayGui.GuiWindowBox(ConvertRectangle(bounds), title);
-        }
-
-        [Reviewed]
-        public static void GuiGroupBox(Rectangle bounds, string? text)
-        {
-            Raylib_CsLo.RayGui.GuiGroupBox(ConvertRectangle(bounds), text);
-        }
-
-        [Reviewed]
-        public static void GuiLine(Rectangle bounds, string? text)
-        {
-            Raylib_CsLo.RayGui.GuiLine(ConvertRectangle(bounds), text);
-        }
-
-        [Reviewed]
-        public static void GuiLabel(Rectangle bounds, string? text)
-        {
-            Raylib_CsLo.RayGui.GuiLabel(ConvertRectangle(bounds), text);
-        }
-
-        [Reviewed]
-        public static bool GuiButton(Rectangle bounds, string? text)
-        {
-            return Raylib_CsLo.RayGui.GuiButton(ConvertRectangle(bounds), text);
-
-        }
-
-        [Reviewed]
-        public static bool GuiLabelButton(Rectangle bounds, string? text)
-        {
-            return Raylib_CsLo.RayGui.GuiLabelButton(ConvertRectangle(bounds), text);
-        }
-
-        [Reviewed]
-        public static bool GuiToggle(Rectangle bounds, string? text, bool active)
-        {
-            return Raylib_CsLo.RayGui.GuiToggle(ConvertRectangle(bounds), text, active);
-
-        }
-
-        [Reviewed]
-        public static int GuiToggleGroup(Rectangle bounds, string? text, int active)
-        {
-            text ??= string.Empty;
-            return Raylib_CsLo.RayGui.GuiToggleGroup(ConvertRectangle(bounds), text, active);
-        }
-
-        [Reviewed]
-        public static bool GuiCheckBox(Rectangle bounds, string? text, bool @checked)
-        {
-            return Raylib_CsLo.RayGui.GuiCheckBox(ConvertRectangle(bounds), text, @checked);
-        }
-
-        [Reviewed]
-        public static int GuiComboBox(Rectangle bounds, string? text, int active)
-        {
-            text ??= string.Empty;
-            return Raylib_CsLo.RayGui.GuiComboBox(ConvertRectangle(bounds), text, active);
-        }
-
-        [Reviewed]
-        public static bool GuiDropdownBox(Rectangle bounds, string? text, ref int active, bool editMode)
-        {
-            text ??= string.Empty;
             unsafe
             {
+                fixed (byte* textPtr = ToUtf8(text))
+                {
+                    return RayguiNative.GuiGetTextWidth((sbyte*)textPtr);
+                }
+            }
+        }
+
+        #endregion
+
+        #region Container/separator controls
+
+        public static int GuiWindowBox(Rectangle bounds, string? title)
+        {
+            unsafe
+            {
+                fixed (byte* titlePtr = ToUtf8(title))
+                {
+                    return RayguiNative.GuiWindowBox(bounds, (sbyte*)titlePtr);
+                }
+            }
+        }
+
+        public static int GuiGroupBox(Rectangle bounds, string? text)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                {
+                    return RayguiNative.GuiGroupBox(bounds, (sbyte*)textPtr);
+                }
+            }
+        }
+
+        public static int GuiLine(Rectangle bounds, string? text)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                {
+                    return RayguiNative.GuiLine(bounds, (sbyte*)textPtr);
+                }
+            }
+        }
+
+        public static int GuiPanel(Rectangle bounds, string? text)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                {
+                    return RayguiNative.GuiPanel(bounds, (sbyte*)textPtr);
+                }
+            }
+        }
+
+        public static int GuiScrollPanel(Rectangle bounds, string? text, Rectangle content, ref Vector2 scroll, out Rectangle view)
+        {
+            view = default;
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                fixed (Vector2* scrollPtr = &scroll)
+                fixed (Rectangle* viewPtr = &view)
+                {
+                    return RayguiNative.GuiScrollPanel(bounds, (sbyte*)textPtr, content, scrollPtr, viewPtr);
+                }
+            }
+        }
+
+        #endregion
+
+        #region Basic controls
+
+        public static int GuiLabel(Rectangle bounds, string? text)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                {
+                    return RayguiNative.GuiLabel(bounds, (sbyte*)textPtr);
+                }
+            }
+        }
+
+        public static int GuiButton(Rectangle bounds, string? text)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                {
+                    return RayguiNative.GuiButton(bounds, (sbyte*)textPtr);
+                }
+            }
+        }
+
+        public static int GuiLabelButton(Rectangle bounds, string? text)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                {
+                    return RayguiNative.GuiLabelButton(bounds, (sbyte*)textPtr);
+                }
+            }
+        }
+
+        public static int GuiStatusBar(Rectangle bounds, string? text)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                {
+                    return RayguiNative.GuiStatusBar(bounds, (sbyte*)textPtr);
+                }
+            }
+        }
+
+        public static int GuiDummyRec(Rectangle bounds, string? text)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                {
+                    return RayguiNative.GuiDummyRec(bounds, (sbyte*)textPtr);
+                }
+            }
+        }
+
+        public static int GuiGrid(Rectangle bounds, string? text, float spacing, int subdivs, out Vector2 mouseCell)
+        {
+            mouseCell = default;
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                fixed (Vector2* mouseCellPtr = &mouseCell)
+                {
+                    return RayguiNative.GuiGrid(bounds, (sbyte*)textPtr, spacing, subdivs, mouseCellPtr);
+                }
+            }
+        }
+
+        #endregion
+
+        #region Selection controls
+
+        public static int GuiToggle(Rectangle bounds, string? text, ref bool active)
+        {
+            CBool nativeActive = active;
+            int result;
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                {
+                    result = RayguiNative.GuiToggle(bounds, (sbyte*)textPtr, &nativeActive);
+                }
+            }
+            active = nativeActive;
+            return result;
+        }
+
+        public static int GuiToggleGroup(Rectangle bounds, string? text, ref int active)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text ?? string.Empty))
                 fixed (int* activePtr = &active)
                 {
-                    return Raylib_CsLo.RayGui.GuiDropdownBox(ConvertRectangle(bounds), text, activePtr, editMode);
+                    return RayguiNative.GuiToggleGroup(bounds, (sbyte*)textPtr, activePtr);
                 }
             }
         }
 
-        [Reviewed]
-        public static bool GuiSpinner(Rectangle bounds, string? text, ref int value, int minValue, int maxValue, bool editMode)
+        public static int GuiToggleSlider(Rectangle bounds, string? text, ref int active)
         {
             unsafe
             {
+                fixed (byte* textPtr = ToUtf8(text))
+                fixed (int* activePtr = &active)
+                {
+                    return RayguiNative.GuiToggleSlider(bounds, (sbyte*)textPtr, activePtr);
+                }
+            }
+        }
+
+        public static int GuiCheckBox(Rectangle bounds, string? text, ref bool @checked)
+        {
+            CBool nativeChecked = @checked;
+            int result;
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                {
+                    result = RayguiNative.GuiCheckBox(bounds, (sbyte*)textPtr, &nativeChecked);
+                }
+            }
+            @checked = nativeChecked;
+            return result;
+        }
+
+        public static int GuiComboBox(Rectangle bounds, string? text, ref int active)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text ?? string.Empty))
+                fixed (int* activePtr = &active)
+                {
+                    return RayguiNative.GuiComboBox(bounds, (sbyte*)textPtr, activePtr);
+                }
+            }
+        }
+
+        public static int GuiDropdownBox(Rectangle bounds, string? text, ref int active, bool editMode)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text ?? string.Empty))
+                fixed (int* activePtr = &active)
+                {
+                    return RayguiNative.GuiDropdownBox(bounds, (sbyte*)textPtr, activePtr, editMode);
+                }
+            }
+        }
+
+        public static int GuiSpinner(Rectangle bounds, string? text, ref int value, int minValue, int maxValue, bool editMode)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
                 fixed (int* valuePtr = &value)
                 {
-                    return Raylib_CsLo.RayGui.GuiSpinner(ConvertRectangle(bounds), text, valuePtr, minValue, maxValue, editMode);
+                    return RayguiNative.GuiSpinner(bounds, (sbyte*)textPtr, valuePtr, minValue, maxValue, editMode);
                 }
             }
         }
 
-        [Reviewed]
-        public static bool GuiValueBox(Rectangle bounds, string? text, ref int value, int minValue, int maxValue, bool editMode)
+        public static int GuiValueBox(Rectangle bounds, string? text, ref int value, int minValue, int maxValue, bool editMode)
         {
             unsafe
             {
+                fixed (byte* textPtr = ToUtf8(text))
                 fixed (int* valuePtr = &value)
                 {
-                    return Raylib_CsLo.RayGui.GuiValueBox(ConvertRectangle(bounds), text, valuePtr, minValue, maxValue, editMode);
+                    return RayguiNative.GuiValueBox(bounds, (sbyte*)textPtr, valuePtr, minValue, maxValue, editMode);
                 }
             }
         }
 
-        [Reviewed]
-        public static bool GuiTextBox(Rectangle bounds, ref string? text, int textSize, bool editMode)
+        public static int GuiValueBoxFloat(Rectangle bounds, string? text, ref string? textValue, ref float value, bool editMode)
+        {
+            byte[] textValueBuffer = ToUtf8Buffer(textValue, ValueBoxMaxChars + 1);
+            int result;
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                fixed (byte* textValuePtr = textValueBuffer)
+                fixed (float* valuePtr = &value)
+                {
+                    result = RayguiNative.GuiValueBoxFloat(bounds, (sbyte*)textPtr, (sbyte*)textValuePtr, valuePtr, editMode);
+                }
+            }
+            textValue = FromUtf8Buffer(textValueBuffer);
+            return result;
+        }
+
+        #endregion
+
+        #region Text and value controls
+
+        public static int GuiTextBox(Rectangle bounds, ref string? text, int textSize, bool editMode)
+        {
+            byte[] textBuffer = ToUtf8Buffer(text, textSize);
+            int result;
+            unsafe
+            {
+                fixed (byte* textPtr = textBuffer)
+                {
+                    result = RayguiNative.GuiTextBox(bounds, (sbyte*)textPtr, textSize, editMode);
+                }
+            }
+            text = FromUtf8Buffer(textBuffer);
+            return result;
+        }
+
+        // GuiTextBoxMulti was removed in raygui 5.0, which has no multiline text editing control.
+
+        public static int GuiSlider(Rectangle bounds, string? textLeft, string? textRight, ref float value, float minValue, float maxValue)
         {
             unsafe
             {
-                byte[] utf8Bytes = Encoding.UTF8.GetBytes(text ?? "");
-                if (utf8Bytes.Length == 0)
+                fixed (byte* textLeftPtr = ToUtf8(textLeft))
+                fixed (byte* textRightPtr = ToUtf8(textRight))
+                fixed (float* valuePtr = &value)
                 {
-                    utf8Bytes = new byte[] { 0 }; // create a byte array with a single null terminator
-                }
-                var signed = Array.ConvertAll(utf8Bytes, x => unchecked((sbyte)x));
-                fixed (sbyte* ptr = signed)
-                {
-                    bool returnValue = Raylib_CsLo.RayGui.GuiTextBox(ConvertRectangle(bounds), ptr, textSize, editMode);
-                    text = ConvertSbyte(ptr, textSize);
-
-                    return returnValue;
+                    return RayguiNative.GuiSlider(bounds, (sbyte*)textLeftPtr, (sbyte*)textRightPtr, valuePtr, minValue, maxValue);
                 }
             }
         }
 
-        [Reviewed]
-        public static bool GuiTextBoxMulti(Rectangle bounds, ref string? text, int textSize, bool editMode)
+        public static int GuiSliderBar(Rectangle bounds, string? textLeft, string? textRight, ref float value, float minValue, float maxValue)
         {
             unsafe
             {
-                byte[] utf8Bytes = Encoding.UTF8.GetBytes(text ?? "");
-                if (utf8Bytes.Length == 0)
+                fixed (byte* textLeftPtr = ToUtf8(textLeft))
+                fixed (byte* textRightPtr = ToUtf8(textRight))
+                fixed (float* valuePtr = &value)
                 {
-                    utf8Bytes = new byte[] { 0 }; // create a byte array with a single null terminator
-                }
-                var signed = Array.ConvertAll(utf8Bytes, x => unchecked((sbyte)x));
-                fixed (sbyte* ptr = signed)
-                {
-                    bool returnValue = Raylib_CsLo.RayGui.GuiTextBoxMulti(ConvertRectangle(bounds), ptr, textSize, editMode);
-                    text = ConvertSbyte(ptr, textSize);
-
-                    return returnValue;
+                    return RayguiNative.GuiSliderBar(bounds, (sbyte*)textLeftPtr, (sbyte*)textRightPtr, valuePtr, minValue, maxValue);
                 }
             }
         }
 
-        [Reviewed]
-        public static float GuiSlider(Rectangle bounds, string? textLeft, string? textRight, float value, float minValue, float maxValue)
-        {
-            return Raylib_CsLo.RayGui.GuiSlider(ConvertRectangle(bounds), textLeft, textRight, value, minValue, maxValue);
-
-        }
-
-        [Reviewed]
-        public static float GuiSliderBar(Rectangle bounds, string? leftText, string? rightText, float value, float minValue, float maxValue)
-        {
-            return Raylib_CsLo.RayGui.GuiSliderBar(ConvertRectangle(bounds), leftText, rightText, value, minValue, maxValue);
-        }
-
-        [Reviewed]
-        public static float GuiProgressBar(Rectangle bounds, string? textLeft, string? textRight, float value, float minValue, float maxValue)
-        {
-            return Raylib_CsLo.RayGui.GuiProgressBar(ConvertRectangle(bounds), textLeft, textRight, value, minValue, maxValue);
-
-        }
-
-        [Reviewed]
-        public static void GuiStatusBar(Rectangle bounds, string? text)
-        {
-            Raylib_CsLo.RayGui.GuiStatusBar(ConvertRectangle(bounds), text);
-        }
-
-        [Reviewed]
-        public static void GuiDummyRec(Rectangle bounds, string? text)
-        {
-            Raylib_CsLo.RayGui.GuiDummyRec(ConvertRectangle(bounds), text);
-        }
-
-        [Reviewed]
-        public static int GuiListView(Rectangle bounds, string? text, ref int scrollIndex, int active)
+        public static int GuiProgressBar(Rectangle bounds, string? textLeft, string? textRight, ref float value, float minValue, float maxValue)
         {
             unsafe
             {
-                fixed (int* fixedScrollIndex = &scrollIndex)
+                fixed (byte* textLeftPtr = ToUtf8(textLeft))
+                fixed (byte* textRightPtr = ToUtf8(textRight))
+                fixed (float* valuePtr = &value)
                 {
-                    return Raylib_CsLo.RayGui.GuiListView(ConvertRectangle(bounds), text, fixedScrollIndex, active);
+                    return RayguiNative.GuiProgressBar(bounds, (sbyte*)textLeftPtr, (sbyte*)textRightPtr, valuePtr, minValue, maxValue);
                 }
             }
         }
 
-        [Reviewed]
-        public static int GuiListViewEx(Rectangle bounds, string[] textArray, int count, ref int focus, ref int scrollIndex, int active)
+        #endregion
+
+        #region Advanced controls
+
+        public static int GuiListView(Rectangle bounds, string? text, ref int scrollIndex, ref int active)
         {
             unsafe
             {
-                fixed (int* fixedFocus = &focus)
+                fixed (byte* textPtr = ToUtf8(text))
+                fixed (int* scrollIndexPtr = &scrollIndex)
+                fixed (int* activePtr = &active)
                 {
-                    fixed (int* fixedScrollIndex = &scrollIndex)
-                    {
-                        return Raylib_CsLo.RayGui.GuiListViewEx(ConvertRectangle(bounds), textArray, count, fixedFocus, fixedScrollIndex, active);
-                    }
+                    return RayguiNative.GuiListView(bounds, (sbyte*)textPtr, scrollIndexPtr, activePtr);
                 }
             }
         }
 
-        [Reviewed]
-        public static int GuiMessageBox(Rectangle bounds, string? title, string? message, string? buttons)
+        public static int GuiListViewEx(Rectangle bounds, string[] textArray, ref int scrollIndex, ref int active, ref int focus)
         {
-            title ??= string.Empty;
-            message ??= string.Empty;
-            buttons ??= string.Empty;
             unsafe
             {
-                SpanOwner<sbyte> spanOwner = title.MarshalUtf8();
+                sbyte** textArrayPtr = AllocUtf8Array(textArray);
                 try
                 {
-                    SpanOwner<sbyte> spanOwner2 = message.MarshalUtf8();
-                    try
+                    fixed (int* scrollIndexPtr = &scrollIndex)
+                    fixed (int* activePtr = &active)
+                    fixed (int* focusPtr = &focus)
                     {
-                        SpanOwner<sbyte> spanOwner3 = buttons.MarshalUtf8();
-                        try
-                        {
-                            return Raylib_CsLo.RayGui.GuiMessageBox(ConvertRectangle(bounds), spanOwner.AsPtr(), spanOwner2.AsPtr(), spanOwner3.AsPtr());
-                        }
-                        finally
-                        {
-                            spanOwner3.Dispose();
-                        }
-                    }
-                    finally
-                    {
-                        spanOwner2.Dispose();
+                        return RayguiNative.GuiListViewEx(bounds, textArrayPtr, textArray.Length, scrollIndexPtr, activePtr, focusPtr);
                     }
                 }
                 finally
                 {
-                    spanOwner.Dispose();
+                    FreeUtf8Array(textArrayPtr, textArray.Length);
                 }
             }
         }
 
-        [Reviewed]
-        public static int GuiTextInputBox(Rectangle bounds, string? title, string? message, string? buttons, ref string? text, int textMaxSize = 255)
+        public static int GuiTabBar(Rectangle bounds, string? text, ref int hscroll, ref int active)
         {
-            title ??= string.Empty;
-            message ??= string.Empty;
-            buttons ??= string.Empty;
-            text ??= string.Empty;
             unsafe
             {
-                SpanOwner<sbyte> spanOwner = title.MarshalUtf8();
+                fixed (byte* textPtr = ToUtf8(text))
+                fixed (int* hscrollPtr = &hscroll)
+                fixed (int* activePtr = &active)
+                {
+                    return RayguiNative.GuiTabBar(bounds, (sbyte*)textPtr, hscrollPtr, activePtr);
+                }
+            }
+        }
+
+        public static int GuiTabBarEx(Rectangle bounds, string[] textArray, ref int hscroll, ref int active, ref int focus)
+        {
+            unsafe
+            {
+                sbyte** textArrayPtr = AllocUtf8Array(textArray);
                 try
                 {
-                    SpanOwner<sbyte> spanOwner2 = message.MarshalUtf8();
-                    try
+                    fixed (int* hscrollPtr = &hscroll)
+                    fixed (int* activePtr = &active)
+                    fixed (int* focusPtr = &focus)
                     {
-                        SpanOwner<sbyte> spanOwner3 = buttons.MarshalUtf8();
-                        try
-                        {
-                            SpanOwner<sbyte> spanOwner4 = text.MarshalUtf8();
-                            try
-                            {
-                                var textBytes = spanOwner4.AsPtr();
-                                int buttonClicked = Raylib_CsLo.RayGui.GuiTextInputBox(ConvertRectangle(bounds), spanOwner.AsPtr(), spanOwner2.AsPtr(), spanOwner3.AsPtr(), textBytes, textMaxSize, null);
-                                text = ConvertSbyte(textBytes, textMaxSize);
-                                return buttonClicked;
-                            }
-                            finally
-                            {
-                                spanOwner4.Dispose();
-                            }
-                        }
-                        finally
-                        {
-                            spanOwner3.Dispose();
-                        }
-                    }
-                    finally
-                    {
-                        spanOwner2.Dispose();
+                        return RayguiNative.GuiTabBarEx(bounds, textArrayPtr, textArray.Length, hscrollPtr, activePtr, focusPtr);
                     }
                 }
                 finally
                 {
-                    spanOwner.Dispose();
+                    FreeUtf8Array(textArrayPtr, textArray.Length);
                 }
             }
         }
 
-        [Reviewed]
-        public static void GuiLoadStyle(string? fileName)
+        public static int GuiMessageBox(Rectangle bounds, string? title, string? message, string? buttons, ref int btnActive)
         {
-            fileName ??= string.Empty;
-            Raylib_CsLo.RayGui.GuiLoadStyle(fileName);
+            unsafe
+            {
+                fixed (byte* titlePtr = ToUtf8(title))
+                fixed (byte* messagePtr = ToUtf8(message))
+                fixed (byte* buttonsPtr = ToUtf8(buttons ?? string.Empty))
+                fixed (int* btnActivePtr = &btnActive)
+                {
+                    return RayguiNative.GuiMessageBox(bounds, (sbyte*)titlePtr, (sbyte*)messagePtr, (sbyte*)buttonsPtr, btnActivePtr);
+                }
+            }
         }
 
-        [Reviewed]
-        public static string GuiIconText(int iconId, string? text)
+        public static int GuiTextInputBox(Rectangle bounds, string? title, string? message, ref string? text, int textMaxSize, string? buttons, ref int btnActive)
         {
-            return Raylib_CsLo.RayGui.GuiIconText(iconId, text);
+            unsafe
+            {
+                return TextInputBox(bounds, title, message, ref text, textMaxSize, buttons, ref btnActive, null);
+            }
         }
+
+        public static int GuiTextInputBox(Rectangle bounds, string? title, string? message, ref string? text, int textMaxSize, string? buttons, ref int btnActive, ref bool secretViewActive)
+        {
+            CBool nativeSecretViewActive = secretViewActive;
+            int result;
+            unsafe
+            {
+                result = TextInputBox(bounds, title, message, ref text, textMaxSize, buttons, ref btnActive, &nativeSecretViewActive);
+            }
+            secretViewActive = nativeSecretViewActive;
+            return result;
+        }
+
+        private static unsafe int TextInputBox(Rectangle bounds, string? title, string? message, ref string? text, int textMaxSize, string? buttons, ref int btnActive, CBool* secretViewActive)
+        {
+            byte[] textBuffer = ToUtf8Buffer(text, textMaxSize);
+            int result;
+            fixed (byte* titlePtr = ToUtf8(title))
+            fixed (byte* messagePtr = ToUtf8(message))
+            fixed (byte* textPtr = textBuffer)
+            fixed (byte* buttonsPtr = ToUtf8(buttons ?? string.Empty))
+            fixed (int* btnActivePtr = &btnActive)
+            {
+                result = RayguiNative.GuiTextInputBox(bounds, (sbyte*)titlePtr, (sbyte*)messagePtr, (sbyte*)textPtr, textMaxSize, (sbyte*)buttonsPtr, btnActivePtr, secretViewActive);
+            }
+            text = FromUtf8Buffer(textBuffer);
+            return result;
+        }
+
+        #endregion
+
+        #region Color controls
+
+        public static int GuiColorPicker(Rectangle bounds, string? text, ref Color color)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                fixed (Color* colorPtr = &color)
+                {
+                    return RayguiNative.GuiColorPicker(bounds, (sbyte*)textPtr, colorPtr);
+                }
+            }
+        }
+
+        public static int GuiColorPanel(Rectangle bounds, string? text, ref Color color)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                fixed (Color* colorPtr = &color)
+                {
+                    return RayguiNative.GuiColorPanel(bounds, (sbyte*)textPtr, colorPtr);
+                }
+            }
+        }
+
+        public static int GuiColorBarAlpha(Rectangle bounds, string? text, ref float alpha)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                fixed (float* alphaPtr = &alpha)
+                {
+                    return RayguiNative.GuiColorBarAlpha(bounds, (sbyte*)textPtr, alphaPtr);
+                }
+            }
+        }
+
+        public static int GuiColorBarHue(Rectangle bounds, string? text, ref float value)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                fixed (float* valuePtr = &value)
+                {
+                    return RayguiNative.GuiColorBarHue(bounds, (sbyte*)textPtr, valuePtr);
+                }
+            }
+        }
+
+        public static int GuiColorPickerHSV(Rectangle bounds, string? text, ref Vector3 colorHsv)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                fixed (Vector3* colorHsvPtr = &colorHsv)
+                {
+                    return RayguiNative.GuiColorPickerHSV(bounds, (sbyte*)textPtr, colorHsvPtr);
+                }
+            }
+        }
+
+        public static int GuiColorPanelHSV(Rectangle bounds, string? text, ref Vector3 colorHsv)
+        {
+            unsafe
+            {
+                fixed (byte* textPtr = ToUtf8(text))
+                fixed (Vector3* colorHsvPtr = &colorHsv)
+                {
+                    return RayguiNative.GuiColorPanelHSV(bounds, (sbyte*)textPtr, colorHsvPtr);
+                }
+            }
+        }
+
+        #endregion
     }
 }
