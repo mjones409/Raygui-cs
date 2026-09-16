@@ -47,13 +47,80 @@ gcc -shared -fPIC -O2 -Iraylib-6.0_linux_amd64/include raygui.c -Lraylib-6.0_lin
 clang -dynamiclib -O2 -Iraylib-6.0_macos/include raygui.c -Lraylib-6.0_macos/lib -lraylib -Wl,-rpath,@loader_path -o libraygui.dylib
 ```
 
-## Differences from raygui 3.x
+## Usage
 
-Earlier versions of Raygui-cs wrapped raygui 3.x through Raylib-CsLo. raygui 5.0 changed its API, and the wrapper now follows it:
+```csharp
+using Raylib_cs;
+using RayGui_cs;
 
-- Controls return an `int` result code (`0` none, `1` pressed, `2` changed) instead of `bool` or the new value.
-- Control state is passed by `ref`, for example `GuiCheckBox(bounds, text, ref isChecked)` and `GuiSlider(bounds, left, right, ref value, min, max)`.
-- `GuiScrollPanel` and `GuiGrid` return their view and mouse cell through `out` parameters.
-- `GuiMessageBox` and `GuiTextInputBox` write the clicked button to `ref int btnActive`. `GuiTextInputBox` now takes its parameters in raygui 5.0's order.
-- `GuiFade` has been replaced by `GuiSetAlpha`. `GuiTextBoxMulti`, `GuiSetIconPixel`, `GuiClearIconPixel` and `GuiCheckIconPixel` no longer exist in raygui.
-- New in raygui 5.0: `GuiToggleSlider`, `GuiValueBoxFloat`, `GuiTabBar`, `GuiTabBarEx`, `GuiColorPickerHSV`, `GuiColorPanelHSV`, tooltips, `GuiGetTextWidth`, `GuiLoadStyleFromMemory`, `GuiLoadIcons` and `GuiLoadIconsFromMemory`.
+Raylib.InitWindow(800, 450, "Raygui-cs");
+
+float volume = 0.5f;
+int quality = 0;
+bool qualityOpen = false;
+bool showMessage = false;
+
+while (!Raylib.WindowShouldClose())
+{
+    Raylib.BeginDrawing();
+    Raylib.ClearBackground(GuiStyle.GetColor(GuiDefaultProperty.BackgroundColor));
+
+    if (Gui.Button(new Rectangle(24, 24, 160, 30), Gui.IconText(GuiIconName.Info, "Show message")))
+    {
+        showMessage = true;
+    }
+
+    volume = Gui.Slider(new Rectangle(80, 70, 200, 20), "Volume", null, volume, 0, 1);
+
+    (quality, qualityOpen) = Gui.DropdownBox(new Rectangle(24, 110, 160, 30), ["Low", "Medium", "High"], quality, qualityOpen);
+
+    if (showMessage && Gui.MessageBox(new Rectangle(250, 150, 300, 120), "Hello", "raygui from C#", "OK;Cancel").IsDismissed)
+    {
+        showMessage = false;
+    }
+
+    Raylib.EndDrawing();
+}
+
+Raylib.CloseWindow();
+```
+
+## API conventions
+
+raygui is an immediate mode library: you call each control every frame, pass in its current state, and keep the state it gives back.
+
+- **Controls are methods on `Gui`**, without raygui's `Gui` prefix: `GuiButton` is `Gui.Button`.
+- **Single values go in and come back out.** `Toggle`, `CheckBox`, `ComboBox`, the sliders and the color controls take the current value and return the new one.
+- **Multiple values come back as a result struct** that can be deconstructed, for example `(scroll, view) = Gui.ScrollPanel(...)` or `(text, isEditing) = Gui.TextBox(...)`. Controls with an edit mode return the next edit state, so you never toggle it yourself.
+- **Clicks are `bool`.** `Button`, `LabelButton`, `WindowBox` (close button), `Panel` (header), `StatusBar` and `DummyRec` return `true` when clicked. Display only controls return nothing.
+- **"None" is `null`**, never `-1`: `Grid` returns `Vector2?`, `ListView` takes and returns `int? active`, and dialogs report `ClickedButton` as a zero based `int?`.
+- **Lists can be collections.** Controls that take `;` separated text also accept a collection of strings.
+- **Global state is properties:** `Gui.IsLocked`, `Gui.Alpha`, `Gui.State`, `Gui.Font`, `Gui.TooltipsEnabled`, `Gui.Tooltip` and `Gui.IconScale`.
+- **Styles use enums**, through `GuiStyle`: `GuiStyle.Set(GuiControl.Button, GuiControlProperty.BorderWidth, 2)`, `GuiStyle.SetColor(GuiDefaultProperty.BackgroundColor, Color.Black)` or `GuiStyle.Set(GuiDropdownBoxProperty.DropdownRollUp, true)`.
+- **Text length limits are in UTF-8 bytes** and don't include the null terminator (`maxByteCount`).
+- **Invalid arguments throw** instead of reaching raygui, which doesn't check its inputs. For example, an out of range style property or icon throws `ArgumentOutOfRangeException`, and a missing style file throws `FileNotFoundException`.
+
+## Migrating from earlier versions
+
+Earlier versions of Raygui-cs wrapped raygui 3.x through Raylib-CsLo, using raygui's C function names.
+
+| Earlier | Now |
+|---------|-----|
+| `Gui.GuiButton(...)` and other controls | `Gui.Button(...)`, and so on |
+| `GuiLock`, `GuiUnlock`, `GuiIsLocked` | `Gui.IsLocked` |
+| `GuiFade(alpha)` | `Gui.Alpha = alpha` |
+| `GuiSetState`, `GuiGetState` | `Gui.State` (`GuiState`) |
+| `GuiSetFont`, `GuiGetFont` | `Gui.Font` |
+| `GuiSetIconScale` | `Gui.IconScale` |
+| `GuiSetStyle`, `GuiGetStyle` | `GuiStyle.Set`, `GuiStyle.Get`, `GuiStyle.SetColor`, `GuiStyle.GetColor` |
+| `GuiLoadStyle`, `GuiLoadStyleDefault` | `GuiStyle.Load`, `GuiStyle.LoadDefault` |
+| `GuiIconText(int, text)`, `GuiDrawIcon(int, ...)` | `Gui.IconText(GuiIconName, text)`, `Gui.DrawIcon(GuiIconName, ...)` |
+| `GuiScrollPanel(..., ref scroll)` returning the view | `(scroll, view) = Gui.ScrollPanel(..., scroll)` |
+| `GuiDropdownBox(..., ref active, editMode)` returning a toggle flag | `(active, isOpen) = Gui.DropdownBox(..., active, isOpen)` |
+| `GuiSpinner`, `GuiValueBox` with `ref value` | `(value, isEditing) = Gui.Spinner(...)` / `Gui.ValueBox(...)` |
+| `GuiTextBox(bounds, ref text, textSize, editMode)` | `(text, isEditing) = Gui.TextBox(bounds, text, maxByteCount, isEditing)` |
+| `GuiListView(..., ref scrollIndex, active)`, `GuiListViewEx` | `(scrollIndex, active) = Gui.ListView(..., scrollIndex, active)` |
+| `GuiMessageBox` returning -1, 0 or a 1 based button | `Gui.MessageBox` returning `ClickedButton` and `Closed` |
+| `GuiTextInputBox(bounds, title, message, buttons, ref text, textMaxSize)` | `Gui.TextInputBox(bounds, title, message, text, maxByteCount, buttons)` |
+
+`GuiTextBoxMulti`, `GuiSetIconPixel`, `GuiClearIconPixel` and `GuiCheckIconPixel` were removed from raygui 5.0 and have no replacement. New in this version: `ToggleSlider`, `FloatValueBox`, `TabBar`, `ColorPickerHsv`, `ColorPanelHsv`, tooltips, `GetTextWidth`, `GuiStyle.Load(ReadOnlySpan<byte>)` and `LoadIcons`.

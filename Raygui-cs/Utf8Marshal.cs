@@ -33,16 +33,11 @@ namespace RayGui_cs
             return Encoding.UTF8.GetString(buffer, 0, length < 0 ? buffer.Length : length);
         }
 
-        internal static unsafe string FromUtf8(sbyte* text)
-        {
-            return Marshal.PtrToStringUTF8((IntPtr)text) ?? string.Empty;
-        }
-
         // Allocates a native array of null-terminated UTF-8 strings; release it with FreeUtf8Array.
-        internal static unsafe sbyte** AllocUtf8Array(string[] items)
+        internal static unsafe sbyte** AllocUtf8Array(IReadOnlyList<string> items)
         {
-            sbyte** array = (sbyte**)NativeMemory.AllocZeroed((nuint)items.Length, (nuint)sizeof(sbyte*));
-            for (int i = 0; i < items.Length; i++)
+            sbyte** array = (sbyte**)NativeMemory.AllocZeroed((nuint)items.Count, (nuint)sizeof(sbyte*));
+            for (int i = 0; i < items.Count; i++)
             {
                 array[i] = (sbyte*)Marshal.StringToCoTaskMemUTF8(items[i] ?? string.Empty);
             }
