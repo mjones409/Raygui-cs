@@ -8,7 +8,7 @@ using static RayGui_cs.Utf8Marshal;
 
 namespace RayGui_cs
 {
-    public static class Gui
+    public static partial class Gui
     {
         // GuiResult values returned by raygui controls.
         private const int ResultPressed = 1;

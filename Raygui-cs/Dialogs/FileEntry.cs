@@ -9,29 +9,34 @@ namespace RayGui_cs
         Folder,
     }
 
-    // What a dialog tells the browser when it opens.
-    internal sealed class FileBrowserOptions
+    // The public dialog options, in one shape for the browser; passed in every frame.
+    internal readonly struct FileBrowserOptions
     {
-        public required FileBrowserMode Mode { get; init; }
         public required string Title { get; init; }
         public string? Description { get; init; }
-        public string OkText { get; set; } = "OK";
+        public required string OkText { get; init; }
         public bool Multiselect { get; init; }
-        public IReadOnlyList<FileFilter> Filters { get; init; } = [];
-        public int FilterIndex { get; init; }
-        // Null opens the drive list.
-        public required string? InitialDirectory { get; init; }
-        public string FileName { get; init; } = string.Empty;
-        // Name of an entry of the initial folder to select.
-        public string? SelectName { get; init; }
-        public bool ShowHiddenFiles { get; init; }
-        public bool ShowNewFolderButton { get; set; }
+        public string? Filter { get; init; }
+        public bool DimBackground { get; init; }
+        public bool ShowNewFolderButton { get; init; }
         public bool ShowPinnedPlaces { get; init; }
-        public bool ShowReadOnly { get; set; }
-        public bool ReadOnlyChecked { get; set; }
+        public bool ShowReadOnly { get; init; }
         public bool ShowHelp { get; init; }
         public bool OkRequiresInteraction { get; init; }
-        public IReadOnlyList<FileDialogCustomPlace> CustomPlaces { get; init; } = [];
+        public IReadOnlyList<FileDialogCustomPlace>? CustomPlaces { get; init; }
+
+        // Checks on accepted file names, which the folder dialog doesn't use.
+        public bool AddExtension { get; init; }
+        public bool CheckFileExists { get; init; }
+        public bool CheckPathExists { get; init; }
+        public string? DefaultExt { get; init; }
+        public bool DereferenceLinks { get; init; }
+        public bool SupportMultiDottedExtensions { get; init; }
+        public bool ValidateNames { get; init; }
+        public bool SelectReadOnlyFiles { get; init; }
+        public bool CheckWriteAccess { get; init; }
+        public bool OverwritePrompt { get; init; }
+        public bool CreatePrompt { get; init; }
     }
 
     // A file, folder or drive shown in the browser.

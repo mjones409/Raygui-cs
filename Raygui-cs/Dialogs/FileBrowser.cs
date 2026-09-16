@@ -6,7 +6,8 @@ using System.Security;
 namespace RayGui_cs
 {
     // The window shared by the file and folder dialogs: toolbar, places, file list, file name row and buttons.
-    internal sealed class FileBrowser
+    // Kept in a FileDialogState and drawn every frame with that frame's bounds and options.
+    internal sealed partial class FileBrowser
     {
         // Must match RAYGUI_WINDOWBOX_STATUSBAR_HEIGHT and RAYGUI_WINDOWBOX_CLOSEBUTTON_HEIGHT in the native build.
         private const int TitleBarHeight = 24;
@@ -22,9 +23,18 @@ namespace RayGui_cs
         private static readonly StringComparer PathComparer =
             OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
-        private readonly CommonDialog owner;
-        private readonly FileBrowserOptions options;
+        private readonly FileDialogState state;
+        private FileBrowserOptions options;
+        private bool initialized;
+        private string? loadedFilter;
+        private FileFilter[] filters = [];
+        private FileDialogCustomPlace[] loadedCustomPlaces = [];
         private List<Place> places = [];
+
+        // This frame's result.
+        private List<string>? acceptedPaths;
+        private bool canceled;
+        private bool helpClicked;
 
         // Navigation.
         private readonly Stack<string?> backHistory = new();
@@ -44,9 +54,11 @@ namespace RayGui_cs
         private string typeAhead = string.Empty;
         private double typeAheadTime;
         private bool interacted;
+        // A double-clicked file is accepted when the button is released, so the release doesn't reach the UI behind the dialog.
+        private bool acceptOnRelease;
 
         // Controls.
-        private string fileNameText;
+        private string fileNameText = string.Empty;
         private bool fileNameEditing;
         private string addressText = string.Empty;
         private bool addressEditing;
@@ -65,8 +77,11 @@ namespace RayGui_cs
         private Prompt? prompt;
         private long frame;
 
-        // Window.
+        // Window. The dialog is drawn at bounds, and nextBounds is where the user moved or resized it to.
         private Rectangle bounds;
+        private Rectangle nextBounds;
+        private bool callerLocked;
+        private bool locked;
         private DragMode drag;
         private Vector2 dragOffset;
         private bool cursorChanged;
@@ -86,43 +101,10 @@ namespace RayGui_cs
         private int padding;
         private float alpha;
 
-        public FileBrowser(CommonDialog owner, FileBrowserOptions options, Rectangle? initialBounds)
+        public FileBrowser(FileBrowserMode mode, FileDialogState state)
         {
-            this.owner = owner;
-            this.options = options;
-            fileNameText = options.FileName;
-            filterIndex = options.Filters.Count > 0 ? Math.Clamp(options.FilterIndex, 0, options.Filters.Count - 1) : 0;
-            showHidden = options.ShowHiddenFiles;
-            ReadOnlyChecked = options.ReadOnlyChecked;
-
-            UpdateMetrics();
-            bounds = initialBounds ?? DefaultBounds();
-            ClampBounds();
-            LoadPlaces();
-
-            if (!Navigate(options.InitialDirectory, record: false))
-            {
-                // Dismiss the error for the initial folder and fall back to one that can be read.
-                prompt = null;
-                string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                if (!Navigate(home, record: false))
-                {
-                    prompt = null;
-                    Navigate(OperatingSystem.IsWindows() ? null : "/", record: false);
-                }
-            }
-
-            if (!string.IsNullOrEmpty(options.SelectName))
-            {
-                FileEntry? entry = visible.FirstOrDefault(e => PathComparer.Equals(e.Name, options.SelectName) || PathComparer.Equals(e.FullPath, options.SelectName));
-                if (entry is not null)
-                {
-                    SelectOnly(entry.FullPath);
-                    EnsureVisible(IndexOf(entry.FullPath));
-                }
-            }
-            // Navigate clears the folder name in folder mode.
-            fileNameText = options.FileName;
+            Mode = mode;
+            this.state = state;
         }
 
         private enum SortColumn
@@ -140,9 +122,7 @@ namespace RayGui_cs
             Resize,
         }
 
-        public DialogResult? Result { get; private set; }
-
-        public Rectangle Bounds => bounds;
+        public FileBrowserMode Mode { get; }
 
         // The folder shown, or null for the drive list.
         public string? CurrentDirectory { get; private set; }
@@ -153,25 +133,16 @@ namespace RayGui_cs
             set => fileNameText = value;
         }
 
-        public bool ReadOnlyChecked { get; private set; }
-
-        public int FilterIndex => filterIndex;
-
         // The filter chosen in the dropdown, ignoring any typed wildcard pattern.
-        public FileFilter? SelectedFilter => options.Filters.Count > 0 ? options.Filters[filterIndex] : null;
+        public FileFilter? SelectedFilter => filters.Length > 0 ? filters[filterIndex] : null;
 
         public List<FileEntry> SelectedEntries => visible.Where(e => selection.Contains(e.FullPath)).ToList();
 
-        private bool FolderMode => options.Mode == FileBrowserMode.Folder;
+        private bool FolderMode => Mode == FileBrowserMode.Folder;
 
         private bool AnyEditing => fileNameEditing || addressEditing || searchEditing;
 
         #region Public operations
-
-        public void Close(DialogResult result)
-        {
-            Result ??= result;
-        }
 
         // Shows a folder, or the drive list when path is null. Returns false, after showing an error, when it can't be read.
         public bool Navigate(string? path, bool record = true)
@@ -192,7 +163,7 @@ namespace RayGui_cs
                 return false;
             }
 
-            if (record && Result is null && !SamePath(CurrentDirectory, full))
+            if (record && !SamePath(CurrentDirectory, full))
             {
                 backHistory.Push(CurrentDirectory);
                 forwardHistory.Clear();
@@ -302,28 +273,68 @@ namespace RayGui_cs
 
         #region Frame
 
-        public void Draw()
+        public FileDialogResult Draw(Rectangle dialogBounds, FileBrowserOptions frameOptions)
         {
             frame++;
             tooltip = null;
-            UpdateMetrics();
-            ClampBounds();
+            acceptedPaths = null;
+            canceled = false;
+            helpClicked = false;
+            // A locked gui locks the dialog too, and the input that opened the dialog must not also act on it.
+            callerLocked = Gui.IsLocked;
+            locked = callerLocked || frame == 1;
 
-            if (prompt is null && !filterOpen)
+            UpdateMetrics();
+            bounds = ClampBounds(dialogBounds);
+            nextBounds = bounds;
+            ApplyOptions(frameOptions);
+            if (!initialized)
+            {
+                Initialize();
+            }
+
+            try
+            {
+                DrawWindow();
+            }
+            finally
+            {
+                Gui.IsLocked = callerLocked;
+            }
+
+            if (acceptedPaths is not null || canceled)
+            {
+                ReleaseCursor();
+            }
+            return new FileDialogResult(nextBounds, acceptedPaths, canceled) { HelpClicked = helpClicked };
+        }
+
+        private void DrawWindow()
+        {
+            if (!locked && prompt is null && !filterOpen)
             {
                 HandleWindowDrag();
                 HandleKeyboard();
             }
-            else if (filterOpen && Raylib.IsKeyPressed(KeyboardKey.Escape))
+            else if (!locked && filterOpen && Raylib.IsKeyPressed(KeyboardKey.Escape))
             {
                 filterOpen = false;
             }
             AutoRefresh();
 
-            bool modal = prompt is not null;
-            bool blockMain = modal || filterOpen;
+            if (acceptOnRelease && !Raylib.IsMouseButtonDown(MouseButton.Left))
+            {
+                acceptOnRelease = false;
+                if (!locked && prompt is null)
+                {
+                    Accept();
+                }
+            }
 
-            if (owner.DimBackground)
+            bool modal = prompt is not null;
+            bool blockMain = locked || modal || filterOpen;
+
+            if (options.DimBackground)
             {
                 Raylib.DrawRectangle(0, 0, Raylib.GetScreenWidth(), Raylib.GetScreenHeight(), Fade(Color.Black, 0.35f));
             }
@@ -331,7 +342,7 @@ namespace RayGui_cs
             Gui.IsLocked = blockMain;
             if (Gui.WindowBox(bounds, options.Title))
             {
-                Close(DialogResult.Cancel);
+                canceled = true;
             }
 
             // Layout, top to bottom: toolbar, description, places and list, file name row, button row.
@@ -367,13 +378,13 @@ namespace RayGui_cs
             DrawResizeGrip();
 
             // Drawn last so its open list covers the other controls.
-            Gui.IsLocked = modal;
+            Gui.IsLocked = locked || modal;
             if (filterBounds.Width > 0)
             {
                 DrawFilterDropdown(filterBounds);
             }
 
-            Gui.IsLocked = false;
+            Gui.IsLocked = locked;
             if (prompt is not null)
             {
                 DrawPrompt(prompt);
@@ -381,10 +392,124 @@ namespace RayGui_cs
             DrawTooltip();
         }
 
+        // Takes this frame's options, and updates the view when they or the state changed since the last frame.
+        private void ApplyOptions(FileBrowserOptions frameOptions)
+        {
+            options = frameOptions;
+            bool viewChanged = false;
+            if (options.Filter != loadedFilter)
+            {
+                filters = FileFilter.Parse(options.Filter);
+                loadedFilter = options.Filter;
+                viewChanged = true;
+            }
+
+            int index = filters.Length > 0 ? Math.Min(state.FilterIndex, filters.Length - 1) : 0;
+            if (index != filterIndex)
+            {
+                filterIndex = index;
+                pattern = null;
+                viewChanged = true;
+            }
+            state.FilterIndex = filterIndex;
+
+            if (state.ShowHiddenFiles != showHidden)
+            {
+                showHidden = state.ShowHiddenFiles;
+                viewChanged = true;
+            }
+            if (viewChanged && initialized)
+            {
+                RefreshView();
+            }
+
+            IReadOnlyList<FileDialogCustomPlace> customPlaces = options.CustomPlaces ?? [];
+            if (!customPlaces.SequenceEqual(loadedCustomPlaces))
+            {
+                loadedCustomPlaces = [.. customPlaces];
+                if (initialized)
+                {
+                    LoadPlaces();
+                }
+            }
+        }
+
+        // Opens the state's initial folder on the first frame, once the options are known.
+        private void Initialize()
+        {
+            initialized = true;
+            LoadPlaces();
+
+            // A folder in the initial file name takes precedence over the initial directory.
+            string? fileName = state.InitialFileName;
+            string? nameDirectory = null;
+            string name = string.Empty;
+            if (!string.IsNullOrEmpty(fileName))
+            {
+                nameDirectory = Path.GetDirectoryName(fileName);
+                name = Path.GetFileName(fileName);
+                if (nameDirectory is null && FolderMode)
+                {
+                    // A root, such as "C:\" or "/", is selected as it is.
+                    name = fileName;
+                }
+            }
+
+            // A drive selected in the folder dialog is shown in the drive list.
+            bool driveList = OperatingSystem.IsWindows() && FolderMode && nameDirectory is null && name.Length > 0;
+            if (!Navigate(driveList ? null : ResolveInitialDirectory(nameDirectory, state.InitialDirectory), record: false))
+            {
+                // Dismiss the error for the initial folder and fall back to one that can be read.
+                prompt = null;
+                string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                if (!Navigate(home, record: false))
+                {
+                    prompt = null;
+                    Navigate(OperatingSystem.IsWindows() ? null : "/", record: false);
+                }
+            }
+
+            if (name.Length > 0)
+            {
+                FileEntry? entry = visible.FirstOrDefault(e => PathComparer.Equals(e.Name, name) || PathComparer.Equals(e.FullPath, name));
+                if (entry is not null)
+                {
+                    SelectOnly(entry.FullPath);
+                    EnsureVisible(IndexOf(entry.FullPath));
+                }
+            }
+            // Navigate clears the folder name in folder mode.
+            fileNameText = name;
+        }
+
+        // Returns the first candidate that is an existing folder, falling back to the current directory.
+        private static string ResolveInitialDirectory(params string?[] candidates)
+        {
+            foreach (string? candidate in candidates)
+            {
+                if (string.IsNullOrWhiteSpace(candidate))
+                {
+                    continue;
+                }
+                try
+                {
+                    string full = Path.GetFullPath(Environment.ExpandEnvironmentVariables(candidate));
+                    if (Directory.Exists(full))
+                    {
+                        return full;
+                    }
+                }
+                catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException or UnauthorizedAccessException)
+                {
+                }
+            }
+            return Environment.CurrentDirectory;
+        }
+
         private void UpdateMetrics()
         {
             font = Gui.Font;
-            textSize = Math.Max(1, GuiStyle.Get(GuiDefaultProperty.TextSize));
+            textSize = StyleTextSize();
             textSpacing = GuiStyle.Get(GuiDefaultProperty.TextSpacing);
             borderWidth = GuiStyle.Get(GuiControl.Default, GuiControlProperty.BorderWidth);
             iconScale = Gui.IconScale;
@@ -395,29 +520,33 @@ namespace RayGui_cs
             alpha = Gui.Alpha;
         }
 
-        private Rectangle DefaultBounds()
+        // Bounds centered on the screen and sized for the current style.
+        public static Rectangle DefaultBounds()
         {
+            int size = StyleTextSize();
             int screenWidth = Raylib.GetScreenWidth();
             int screenHeight = Raylib.GetScreenHeight();
-            float width = MathF.Min(screenWidth * 0.9f, MathF.Max(MinWidth(), textSize * 80));
-            float height = MathF.Min(screenHeight * 0.9f, MathF.Max(MinHeight(), textSize * 52));
-            return new Rectangle((screenWidth - width) / 2, (screenHeight - height) / 2, width, height);
+            float width = MathF.Min(screenWidth * 0.9f, MathF.Max(MinWidth(size), size * 80));
+            float height = MathF.Min(screenHeight * 0.9f, MathF.Max(MinHeight(size), size * 52));
+            return new Rectangle(MathF.Round((screenWidth - width) / 2), MathF.Round((screenHeight - height) / 2), width, height);
         }
 
-        private float MinWidth() => Math.Max(360, textSize * 36);
+        private static int StyleTextSize() => Math.Max(1, GuiStyle.Get(GuiDefaultProperty.TextSize));
 
-        private float MinHeight() => Math.Max(260, textSize * 22);
+        private static float MinWidth(int size) => Math.Max(360, size * 36);
 
-        private void ClampBounds()
+        private static float MinHeight(int size) => Math.Max(260, size * 22);
+
+        // Keeps the dialog on the screen and at least its minimum size.
+        private Rectangle ClampBounds(Rectangle rect)
         {
             int screenWidth = Raylib.GetScreenWidth();
             int screenHeight = Raylib.GetScreenHeight();
-            bounds.Width = Math.Clamp(bounds.Width, Math.Min(MinWidth(), screenWidth), screenWidth);
-            bounds.Height = Math.Clamp(bounds.Height, Math.Min(MinHeight(), screenHeight), screenHeight);
-            bounds.X = Math.Clamp(bounds.X, 0, screenWidth - bounds.Width);
-            bounds.Y = Math.Clamp(bounds.Y, 0, screenHeight - bounds.Height);
-            bounds.X = MathF.Round(bounds.X);
-            bounds.Y = MathF.Round(bounds.Y);
+            rect.Width = Math.Clamp(rect.Width, Math.Min(MinWidth(textSize), screenWidth), screenWidth);
+            rect.Height = Math.Clamp(rect.Height, Math.Min(MinHeight(textSize), screenHeight), screenHeight);
+            rect.X = MathF.Round(Math.Clamp(rect.X, 0, screenWidth - rect.Width));
+            rect.Y = MathF.Round(Math.Clamp(rect.Y, 0, screenHeight - rect.Height));
+            return rect;
         }
 
         private Rectangle GripBounds => new(bounds.X + bounds.Width - padding, bounds.Y + bounds.Height - padding, padding, padding);
@@ -446,17 +575,18 @@ namespace RayGui_cs
                 drag = DragMode.None;
             }
 
+            // The dialog stays where it is drawn this frame; the caller passes nextBounds back in to move it.
             if (drag == DragMode.Move)
             {
-                bounds.X = mouse.X - dragOffset.X;
-                bounds.Y = mouse.Y - dragOffset.Y;
+                nextBounds.X = mouse.X - dragOffset.X;
+                nextBounds.Y = mouse.Y - dragOffset.Y;
             }
             else if (drag == DragMode.Resize)
             {
-                bounds.Width = mouse.X + dragOffset.X - bounds.X;
-                bounds.Height = mouse.Y + dragOffset.Y - bounds.Y;
+                nextBounds.Width = mouse.X + dragOffset.X - bounds.X;
+                nextBounds.Height = mouse.Y + dragOffset.Y - bounds.Y;
             }
-            ClampBounds();
+            nextBounds = ClampBounds(nextBounds);
 
             bool resizeCursor = drag == DragMode.Resize || (drag == DragMode.None && Raylib.CheckCollisionPointRec(mouse, GripBounds));
             if (resizeCursor)
@@ -514,7 +644,7 @@ namespace RayGui_cs
                 }
                 else
                 {
-                    Close(DialogResult.Cancel);
+                    canceled = true;
                 }
                 return;
             }
@@ -649,7 +779,7 @@ namespace RayGui_cs
                 return;
             }
             StopEditing();
-            owner.OnAccept(this);
+            OnAccept();
         }
 
         #endregion
@@ -863,6 +993,7 @@ namespace RayGui_cs
         private void ToggleHidden()
         {
             showHidden = !showHidden;
+            state.ShowHiddenFiles = showHidden;
             interacted = true;
             RefreshView();
         }
@@ -895,7 +1026,7 @@ namespace RayGui_cs
         private void CreateFolder(string name)
         {
             name = name.Trim();
-            if (name.Length == 0 || name is "." or ".." || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || !FileDialog.IsValidPathText(name))
+            if (name.Length == 0 || name is "." or ".." || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || !IsValidPathText(name))
             {
                 ShowError($"{name}\nThe folder name is not valid.");
                 return;
@@ -944,7 +1075,7 @@ namespace RayGui_cs
                 }
             }
 
-            foreach (FileDialogCustomPlace place in options.CustomPlaces)
+            foreach (FileDialogCustomPlace place in loadedCustomPlaces)
             {
                 try
                 {
@@ -1287,7 +1418,7 @@ namespace RayGui_cs
                 else
                 {
                     fileNameText = entry.Name;
-                    Accept();
+                    acceptOnRelease = true;
                 }
                 return;
             }
@@ -1588,9 +1719,9 @@ namespace RayGui_cs
             float x = row.X + labelWidth + padding;
             float right = row.X + row.Width;
             Rectangle filterBounds = default;
-            if (options.Filters.Count > 0)
+            if (filters.Length > 0)
             {
-                float longest = options.Filters.Max(f => Measure(f.Description));
+                float longest = filters.Max(f => Measure(f.Description));
                 float filterWidth = Math.Clamp(longest + controlHeight + padding * 2, textSize * 10, row.Width * 0.4f);
                 right -= filterWidth;
                 filterBounds = new Rectangle(right, row.Y, filterWidth, row.Height);
@@ -1609,8 +1740,8 @@ namespace RayGui_cs
         private void DrawFilterDropdown(Rectangle filterBounds)
         {
             // raygui splits items on ';' and limits their total size, so descriptions are sanitized and shortened.
-            int maxLength = Math.Max(8, 900 / options.Filters.Count);
-            IEnumerable<string> items = options.Filters.Select(f =>
+            int maxLength = Math.Max(8, 900 / filters.Length);
+            IEnumerable<string> items = filters.Select(f =>
             {
                 string text = f.Description.Replace(';', ',').Replace('\n', ' ');
                 return text.Length > maxLength ? text[..(maxLength - Ellipsis.Length)] + Ellipsis : text;
@@ -1637,8 +1768,9 @@ namespace RayGui_cs
             if (result.Active != filterIndex)
             {
                 filterIndex = result.Active;
+                state.FilterIndex = filterIndex;
                 pattern = null;
-                if (options.Mode == FileBrowserMode.Save)
+                if (Mode == FileBrowserMode.Save)
                 {
                     ChangeTypedExtension();
                 }
@@ -1666,12 +1798,12 @@ namespace RayGui_cs
                 const string Label = "Open as read-only";
                 float boxSize = Math.Min(row.Height - 6, textSize + 6);
                 Rectangle box = new(x, row.Y + (row.Height - boxSize) / 2, boxSize, boxSize);
-                bool isChecked = Gui.CheckBox(box, Label, ReadOnlyChecked);
-                if (isChecked != ReadOnlyChecked)
+                bool isChecked = Gui.CheckBox(box, Label, state.ReadOnlyChecked);
+                if (isChecked != state.ReadOnlyChecked)
                 {
                     interacted = true;
                 }
-                ReadOnlyChecked = isChecked;
+                state.ReadOnlyChecked = isChecked;
                 x += boxSize + padding + Measure(Label) + padding * 2;
             }
 
@@ -1680,7 +1812,7 @@ namespace RayGui_cs
             right -= cancelWidth;
             if (Gui.Button(new Rectangle(right, row.Y, cancelWidth, row.Height), "Cancel"))
             {
-                Close(DialogResult.Cancel);
+                canceled = true;
             }
 
             right -= padding;
@@ -1705,7 +1837,7 @@ namespace RayGui_cs
                 right -= helpWidth;
                 if (Gui.Button(new Rectangle(right, row.Y, helpWidth, row.Height), "Help"))
                 {
-                    owner.RaiseHelpRequest();
+                    helpClicked = true;
                 }
             }
 
@@ -1764,7 +1896,7 @@ namespace RayGui_cs
         private void DrawPrompt(Prompt current)
         {
             // The input that opened the prompt must not also answer it.
-            bool acceptInput = frame > current.OpenedFrame;
+            bool acceptInput = frame > current.OpenedFrame && !locked;
             Gui.IsLocked = !acceptInput;
 
             Raylib.DrawRectangleRec(bounds, Fade(GuiStyle.GetColor(GuiDefaultProperty.BackgroundColor), 0.6f));

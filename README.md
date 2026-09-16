@@ -102,47 +102,78 @@ raygui is an immediate mode library: you call each control every frame, pass in 
 
 ## File and folder dialogs
 
-raygui has no file dialog, so Raygui-cs includes one written in C# on top of raygui controls. `OpenFileDialog`, `SaveFileDialog` and `FolderBrowserDialog` follow the WinForms classes of the same names. They have the same properties (`Filter`, `FilterIndex`, `InitialDirectory`, `FileName(s)`, `Multiselect`, `DefaultExt`, `AddExtension`, `CheckFileExists`, `OverwritePrompt`, `CreatePrompt`, `ShowReadOnly`, `ShowHiddenFiles`, `ShowPinnedPlaces`, `CustomPlaces`, `ClientGuid`, `OkRequiresInteraction`, `SelectedPath(s)`, `Description`, `ShowNewFolderButton`, ...) and events (`FileOk`, `HelpRequest`). They draw in the current raygui style and work on Windows, Linux and macOS.
+raygui has no file dialog, so Raygui-cs includes one written in C# on top of raygui controls. `Gui.OpenFileDialog`, `Gui.SaveFileDialog` and `Gui.FolderBrowserDialog` are immediate mode controls like the rest of `Gui`. They draw in the current raygui style and work on Windows, Linux and macOS, and their options follow the WinForms dialogs of the same names.
 
 The dialog window can be moved and resized. It has back, forward, up and refresh buttons, an editable address bar, search, a hidden files toggle and a new folder button. The file list can be sorted by column. The places list shows known folders, custom places and drives. The dialogs also have filter and read-only controls, confirmation prompts and keyboard support: arrows, Enter, Backspace, Alt+arrows, Ctrl+A, Ctrl+L, Ctrl+F, Ctrl+H, F5, Ctrl+Shift+N, type-ahead and Escape.
 
-**Blocking**, like WinForms. `ShowDialog` runs its own frame loop until the dialog closes, so it can be called from a button handler:
+Each dialog takes three things every frame:
+
+- **Bounds**, like any other control. `Gui.GetFileDialogBounds()` returns centered bounds sized for the current style. The user can move and resize the dialog, and the result's `Bounds` gives you the new bounds to pass back in on the next frame.
+- **A `FileDialogState`**, which holds everything the dialog remembers between frames: the folder, history, selection, scroll position and prompts. Create one when the dialog opens, and drop it once the dialog is dismissed. Its constructor takes the folder to open and an initial file name (for the folder dialog, the folder to select). The state also exposes `CurrentDirectory`, `FilterIndex` (zero based), `ReadOnlyChecked` and `ShowHiddenFiles`.
+- **Options**, as a struct: `OpenFileDialogOptions`, `SaveFileDialogOptions` or `FolderBrowserDialogOptions`. They use the WinForms names and defaults (`Filter`, `Multiselect`, `DefaultExt`, `AddExtension`, `CheckFileExists`, `OverwritePrompt`, `CreatePrompt`, `ShowReadOnly`, `ShowPinnedPlaces`, `CustomPlaces`, `OkRequiresInteraction`, `Description`, `ShowNewFolderButton`, ...). `default` has the same defaults as `new()`, so you can leave the options out.
+
+Each call returns a `FileDialogResult`:
+
+- **`Paths`** holds the accepted files or folders on the frame the user accepts the dialog.
+- **`Canceled`** is true on the frame the user cancels it, with Cancel, the close button or Escape.
+- **`IsDismissed`** is true in either case.
+- **`HelpClicked`** is true on the frame the user clicks the Help button.
+
+The dialog never closes itself: stop drawing it once the result is dismissed. To reject the accepted files, keep drawing it.
+
+Draw the dialog after the rest of your UI, and lock the rest of your UI while the dialog is open:
 
 ```csharp
-var dialog = new OpenFileDialog { Filter = "Images (*.png, *.jpg)|*.png;*.jpg|All files (*.*)|*.*", Multiselect = true };
-if (Gui.Button(bounds, "Open...") && dialog.ShowDialog(DrawMyUi) == DialogResult.OK)
+var imageFiles = new OpenFileDialogOptions
 {
-    Load(dialog.FileNames);
-}
-```
-
-`DrawMyUi` is optional. It redraws your UI behind the dialog each frame, with the gui locked.
-
-**Non-blocking.** Open the dialog, then call `Draw` every frame after the rest of your UI:
-
-```csharp
-var folderDialog = new FolderBrowserDialog { Description = "Select the source folder" };
+    Filter = "Images (*.png, *.jpg)|*.png;*.jpg|All files (*.*)|*.*",
+    Multiselect = true,
+};
+FileDialogState? openState = null; // null while the dialog is closed
+Rectangle openBounds = default;
+string? lastFolder = null;
 Raylib.SetExitKey(KeyboardKey.Null); // otherwise Escape also closes the window
 
 while (!Raylib.WindowShouldClose())
 {
     Raylib.BeginDrawing();
-    Gui.IsLocked = folderDialog.IsBlockingInput;
-    if (Gui.Button(new Rectangle(10, 10, 120, 30), "Browse..."))
+    Raylib.ClearBackground(GuiStyle.GetColor(GuiDefaultProperty.BackgroundColor));
+
+    Gui.IsLocked = openState is not null;
+    if (Gui.Button(new Rectangle(10, 10, 120, 30), "Open..."))
     {
-        folderDialog.Open();
+        openState = new FileDialogState(lastFolder);
+        openBounds = Gui.GetFileDialogBounds();
     }
     Gui.IsLocked = false;
 
-    if (folderDialog.Draw() == DialogResult.OK)
+    if (openState is not null)
     {
-        source = folderDialog.SelectedPath;
+        FileDialogResult result = Gui.OpenFileDialog(openBounds, "Open image", openState, imageFiles);
+        openBounds = result.Bounds;
+        if (result.Paths is { } files)
+        {
+            Load(files);
+            lastFolder = openState.CurrentDirectory;
+        }
+        if (result.IsDismissed)
+        {
+            openState = null;
+        }
     }
+
     Raylib.EndDrawing();
 }
 ```
 
-Differences from WinForms: `.lnk` shortcuts aren't resolved (symbolic links are), `RestoreDirectory` only restores a current directory changed by your own `FileOk` handler, `ClientGuid` remembers the last folder only for the lifetime of the process, and `AddToRecent` and `AutoUpgradeEnabled` don't exist.
+A dialog ignores input on its first frame, so the click that opened it can't also act on it. Like other controls, it also ignores input when `Gui.IsLocked` is true.
+
+Differences from WinForms:
+
+- `.lnk` shortcuts aren't resolved (symbolic links are).
+- There are no events: accepted files come back in the result instead of through `FileOk`, and `HelpClicked` replaces `HelpRequest`.
+- To reopen a dialog where the user left it, pass the old state's `CurrentDirectory` to the new state. `ClientGuid` doesn't exist.
+- `ShowDialog`, `RestoreDirectory`, `AddToRecent` and `AutoUpgradeEnabled` don't exist.
 
 ## Migrating from earlier versions
 
