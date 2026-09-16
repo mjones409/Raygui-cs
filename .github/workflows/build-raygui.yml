@@ -1,0 +1,60 @@
+# Builds the native raygui.dll that Raygui-cs loads at runtime.
+# Run it manually from the Actions tab, download the "raygui-win-x64" artifact,
+# and commit raygui.dll to Raygui-cs/runtimes/win-x64/native/.
+name: Build raygui.dll
+
+on:
+  workflow_dispatch:
+
+env:
+  RAYGUI_VERSION: "5.0"
+  RAYLIB_VERSION: "6.0" # must match the raylib version that Raylib-cs ships
+
+jobs:
+  build-win-x64:
+    runs-on: windows-latest
+    steps:
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Download raylib and raygui
+        shell: pwsh
+        run: |
+          $raylib = "raylib-$($env:RAYLIB_VERSION)_win64_msvc16"
+          Invoke-WebRequest "https://github.com/raysan5/raylib/releases/download/$($env:RAYLIB_VERSION)/$raylib.zip" -OutFile raylib.zip
+          Expand-Archive raylib.zip -DestinationPath .
+          Rename-Item $raylib raylib
+          Invoke-WebRequest "https://raw.githubusercontent.com/raysan5/raygui/$($env:RAYGUI_VERSION)/src/raygui.h" -OutFile raygui.h
+
+      - name: Build raygui.dll
+        shell: pwsh
+        run: |
+          # raylib is imported from raylib.dll (shared with Raylib-cs); raygui functions are exported.
+          Set-Content raygui.c -Value @(
+            '#define USE_LIBTYPE_SHARED'
+            '#include "raylib.h"'
+            '#undef USE_LIBTYPE_SHARED'
+            '#define BUILD_LIBTYPE_SHARED'
+            '#define RAYGUI_IMPLEMENTATION'
+            '#include "raygui.h"'
+          )
+          cl /nologo /LD /O2 /MT /I raylib\include /I . raygui.c /Fe:raygui.dll /link raylib\lib\raylibdll.lib
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Verify raygui.dll
+        shell: pwsh
+        run: |
+          $exports = dumpbin /nologo /exports raygui.dll | Out-String
+          if ($exports -notmatch '\bGuiButton\b') { throw "raygui.dll does not export GuiButton" }
+          $deps = dumpbin /nologo /dependents raygui.dll | Out-String
+          Write-Output $deps
+          if ($deps -notmatch '\braylib\.dll\b') { throw "raygui.dll is not linked to raylib.dll" }
+
+      - name: Upload raygui.dll
+        uses: actions/upload-artifact@v4
+        with:
+          name: raygui-win-x64
+          path: raygui.dll
+          if-no-files-found: error

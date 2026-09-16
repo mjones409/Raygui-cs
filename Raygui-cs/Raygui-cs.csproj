@@ -11,4 +11,17 @@
     <PackageReference Include="Raylib-cs" Version="8.1.0" />
   </ItemGroup>
 
+  <!-- Native raygui library, built by .github/workflows/build-raygui.yml. Copied next to any app that references this project. -->
+  <PropertyGroup>
+    <RayguiNativeDll>$(MSBuildThisFileDirectory)runtimes\win-x64\native\raygui.dll</RayguiNativeDll>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('$(RayguiNativeDll)')">
+    <None Include="$(RayguiNativeDll)" Link="raygui.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="WarnMissingRayguiNativeDll" BeforeTargets="Build" Condition="!Exists('$(RayguiNativeDll)')">
+    <Warning Text="raygui.dll not found at $(RayguiNativeDll). Run the 'Build raygui.dll' GitHub Actions workflow and commit its output there, or GUI calls will throw DllNotFoundException." />
+  </Target>
+
 </Project>
