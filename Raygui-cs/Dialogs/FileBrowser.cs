@@ -1,7 +1,12 @@
 using Raylib_cs;
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Numerics;
 using System.Security;
+using DragMode = RayGui_cs.FileDialogState.DragMode;
+using PromptKind = RayGui_cs.FileDialogState.PromptKind;
+using PromptState = RayGui_cs.FileDialogState.PromptState;
+using SortColumn = RayGui_cs.FileDialogState.SortColumn;
 
 namespace RayGui_cs
 {
@@ -23,30 +28,39 @@ namespace RayGui_cs
         private static readonly StringComparer PathComparer =
             OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
-        private readonly FileDialogState state;
-        private FileBrowserOptions options;
+        private readonly FileBrowserOptions options;
+        private readonly Cache cache;
         private bool initialized;
-        private string? loadedFilter;
-        private FileFilter[] filters = [];
-        private FileDialogCustomPlace[] loadedCustomPlaces = [];
-        private List<Place> places = [];
+
+        // Loaded from the options, and given back so the caller sees what the user changed.
+        private int filterIndex;
+        private bool showHidden;
+        private bool readOnlyChecked;
 
         // This frame's result.
         private List<string>? acceptedPaths;
         private bool canceled;
         private bool helpClicked;
 
-        // Navigation.
-        private readonly Stack<string?> backHistory = new();
-        private readonly Stack<string?> forwardHistory = new();
+        // The parsed filters and the places, kept until the options they were built from change.
+        private string? loadedFilter;
+        private FileFilter[] filters = [];
+        private FileDialogCustomPlace[] loadedCustomPlaces = [];
+        private List<Place>? places;
+
+        // Navigation. The listing and the view are kept until the folder, the filters or the sort order change.
+        private ImmutableStack<string?> backHistory = ImmutableStack<string?>.Empty;
+        private ImmutableStack<string?> forwardHistory = ImmutableStack<string?>.Empty;
         private List<FileEntry> entries = [];
         private List<FileEntry> visible = [];
+        private ViewKey viewKey;
+        private string? loadedDirectory;
         private string? loadError;
         private DateTime loadedWriteTime;
         private double nextRefreshCheck;
 
         // Selection, by full path so it survives sorting and refreshing.
-        private readonly HashSet<string> selection = new(PathComparer);
+        private ImmutableHashSet<string> selection = ImmutableHashSet.Create(PathComparer);
         private string? focusPath;
         private string? anchorPath;
         private string? lastClickPath;
@@ -64,17 +78,16 @@ namespace RayGui_cs
         private bool addressEditing;
         private string searchText = string.Empty;
         private bool searchEditing;
-        private int filterIndex;
         private bool filterOpen;
-        private FileFilter? pattern;
-        private bool showHidden;
+        // A wildcard pattern typed in the file name box, such as "*.log", which replaces the selected filter.
+        private string? pattern;
         private SortColumn sortColumn = SortColumn.Name;
         private bool sortDescending;
         private Vector2 listScroll;
         private Vector2 placesScroll;
         private Rectangle listView;
         private string? scrollToPath;
-        private Prompt? prompt;
+        private PromptState? prompt;
         private long frame;
 
         // Window. The dialog is drawn at bounds, and nextBounds is where the user moved or resized it to.
@@ -100,27 +113,6 @@ namespace RayGui_cs
         private int controlHeight;
         private int padding;
         private float alpha;
-
-        public FileBrowser(FileBrowserMode mode, FileDialogState state)
-        {
-            Mode = mode;
-            this.state = state;
-        }
-
-        private enum SortColumn
-        {
-            Name,
-            Modified,
-            Type,
-            Size,
-        }
-
-        private enum DragMode
-        {
-            None,
-            Move,
-            Resize,
-        }
 
         public FileBrowserMode Mode { get; }
 
@@ -165,15 +157,17 @@ namespace RayGui_cs
 
             if (record && !SamePath(CurrentDirectory, full))
             {
-                backHistory.Push(CurrentDirectory);
-                forwardHistory.Clear();
+                backHistory = backHistory.Push(CurrentDirectory);
+                forwardHistory = ImmutableStack<string?>.Empty;
             }
 
             CurrentDirectory = full;
+            loadedDirectory = full;
             entries = loaded;
             loadError = null;
             loadedWriteTime = GetWriteTime(full);
-            selection.Clear();
+            nextRefreshCheck = Raylib.GetTime() + RefreshSeconds;
+            selection = selection.Clear();
             focusPath = null;
             anchorPath = null;
             listScroll = default;
@@ -207,7 +201,7 @@ namespace RayGui_cs
                 }
             }
 
-            pattern = new FileFilter(name, name);
+            pattern = name;
             fileNameText = name;
             RefreshView();
         }
@@ -242,21 +236,20 @@ namespace RayGui_cs
 
         public void ShowError(string message)
         {
-            ShowPrompt(new Prompt(options.Title, message, ["OK"], GuiIconName.Warning, (_, _) => { }));
+            ShowPrompt(new PromptState { Kind = PromptKind.Message, Title = options.Title, Message = message });
         }
 
-        // Asks a yes/no question and runs onYes when the user answers yes. No is the default, so Enter doesn't overwrite by accident.
-        public void Confirm(string title, string message, Action onYes)
+        // Asks a yes/no question, and accepts the paths when the user answers yes.
+        // No is the default, so Enter doesn't overwrite by accident.
+        public void ConfirmAccept(string title, string message, List<string> paths)
         {
-            ShowPrompt(new Prompt(title, message, ["Yes", "No"], GuiIconName.Warning, (button, _) =>
+            ShowPrompt(new PromptState
             {
-                if (button == 0)
-                {
-                    onYes();
-                }
-            })
-            {
+                Kind = PromptKind.ConfirmAccept,
+                Title = title,
+                Message = message,
                 DefaultButton = 1,
+                PendingPaths = [.. paths],
             });
         }
 
@@ -273,7 +266,7 @@ namespace RayGui_cs
 
         #region Frame
 
-        public FileDialogResult Draw(Rectangle dialogBounds, FileBrowserOptions frameOptions)
+        private FileBrowserResult DrawFrame()
         {
             frame++;
             tooltip = null;
@@ -285,9 +278,10 @@ namespace RayGui_cs
             locked = callerLocked || frame == 1;
 
             UpdateMetrics();
-            bounds = ClampBounds(dialogBounds);
+            // Empty bounds, from a dialog the caller didn't place, open it centered on the screen.
+            bounds = ClampBounds(options.Bounds is { Width: > 0, Height: > 0 } placed ? placed : DefaultBounds());
             nextBounds = bounds;
-            ApplyOptions(frameOptions);
+            ApplyOptions();
             if (!initialized)
             {
                 Initialize();
@@ -306,7 +300,16 @@ namespace RayGui_cs
             {
                 ReleaseCursor();
             }
-            return new FileDialogResult(nextBounds, acceptedPaths, canceled) { HelpClicked = helpClicked };
+            return new FileBrowserResult
+            {
+                Bounds = nextBounds,
+                FilterIndex = filterIndex,
+                ReadOnlyChecked = readOnlyChecked,
+                ShowHiddenFiles = showHidden,
+                Paths = acceptedPaths?.ToArray(),
+                Canceled = canceled,
+                HelpClicked = helpClicked,
+            };
         }
 
         private void DrawWindow()
@@ -385,54 +388,52 @@ namespace RayGui_cs
             }
 
             Gui.IsLocked = locked;
-            if (prompt is not null)
+            if (prompt is { } current)
             {
-                DrawPrompt(prompt);
+                DrawPrompt(current);
             }
             DrawTooltip();
         }
 
-        // Takes this frame's options, and updates the view when they or the state changed since the last frame.
-        private void ApplyOptions(FileBrowserOptions frameOptions)
+        // Rebuilds whatever this frame's options and state no longer match: the filters, the places, the listing and the view.
+        private void ApplyOptions()
         {
-            options = frameOptions;
-            bool viewChanged = false;
             if (options.Filter != loadedFilter)
             {
                 filters = FileFilter.Parse(options.Filter);
                 loadedFilter = options.Filter;
-                viewChanged = true;
             }
-
-            int index = filters.Length > 0 ? Math.Min(state.FilterIndex, filters.Length - 1) : 0;
-            if (index != filterIndex)
+            filterIndex = filters.Length > 0 ? Math.Min(filterIndex, filters.Length - 1) : 0;
+            if (filterIndex != viewKey.FilterIndex)
             {
-                filterIndex = index;
+                // A filter chosen by the caller replaces a typed wildcard pattern.
                 pattern = null;
-                viewChanged = true;
-            }
-            state.FilterIndex = filterIndex;
-
-            if (state.ShowHiddenFiles != showHidden)
-            {
-                showHidden = state.ShowHiddenFiles;
-                viewChanged = true;
-            }
-            if (viewChanged && initialized)
-            {
-                RefreshView();
             }
 
             IReadOnlyList<FileDialogCustomPlace> customPlaces = options.CustomPlaces ?? [];
-            if (!customPlaces.SequenceEqual(loadedCustomPlaces))
+            if (options.ShowPinnedPlaces && (places is null || !customPlaces.SequenceEqual(loadedCustomPlaces)))
             {
                 loadedCustomPlaces = [.. customPlaces];
-                if (initialized)
-                {
-                    LoadPlaces();
-                }
+                LoadPlaces();
+            }
+
+            if (!initialized)
+            {
+                return;
+            }
+            if (!string.Equals(loadedDirectory, CurrentDirectory, StringComparison.Ordinal))
+            {
+                // The caller navigated by setting the folder in the state.
+                Refresh();
+            }
+            else if (ViewKeyNow != viewKey)
+            {
+                RefreshView();
             }
         }
+
+        // What the visible list should be built from this frame.
+        private ViewKey ViewKeyNow => new(entries, filters, filterIndex, pattern, showHidden, searchText, sortColumn, sortDescending);
 
         // Opens the state's initial folder on the first frame, once the options are known.
         private void Initialize()
@@ -441,7 +442,7 @@ namespace RayGui_cs
             LoadPlaces();
 
             // A folder in the initial file name takes precedence over the initial directory.
-            string? fileName = state.InitialFileName;
+            string? fileName = options.InitialFileName;
             string? nameDirectory = null;
             string name = string.Empty;
             if (!string.IsNullOrEmpty(fileName))
@@ -457,7 +458,7 @@ namespace RayGui_cs
 
             // A drive selected in the folder dialog is shown in the drive list.
             bool driveList = OperatingSystem.IsWindows() && FolderMode && nameDirectory is null && name.Length > 0;
-            if (!Navigate(driveList ? null : ResolveInitialDirectory(nameDirectory, state.InitialDirectory), record: false))
+            if (!Navigate(driveList ? null : ResolveInitialDirectory(nameDirectory, options.InitialDirectory), record: false))
             {
                 // Dismiss the error for the initial folder and fall back to one that can be read.
                 prompt = null;
@@ -794,12 +795,12 @@ namespace RayGui_cs
             float gap = Math.Max(2, padding / 2);
             float x = row.X;
 
-            if (ToolButton(new Rectangle(x, row.Y, size, size), GuiIconName.ArrowLeft, "Back (Alt+Left)", backHistory.Count > 0, input))
+            if (ToolButton(new Rectangle(x, row.Y, size, size), GuiIconName.ArrowLeft, "Back (Alt+Left)", !backHistory.IsEmpty, input))
             {
                 GoBack();
             }
             x += size + gap;
-            if (ToolButton(new Rectangle(x, row.Y, size, size), GuiIconName.ArrowRight, "Forward (Alt+Right)", forwardHistory.Count > 0, input))
+            if (ToolButton(new Rectangle(x, row.Y, size, size), GuiIconName.ArrowRight, "Forward (Alt+Right)", !forwardHistory.IsEmpty, input))
             {
                 GoForward();
             }
@@ -962,38 +963,37 @@ namespace RayGui_cs
 
         private void GoBack()
         {
-            if (backHistory.Count == 0)
+            if (backHistory.IsEmpty)
             {
                 return;
             }
 
             string? current = CurrentDirectory;
-            string? target = backHistory.Pop();
+            backHistory = backHistory.Pop(out string? target);
             if (Navigate(target, record: false))
             {
-                forwardHistory.Push(current);
+                forwardHistory = forwardHistory.Push(current);
             }
         }
 
         private void GoForward()
         {
-            if (forwardHistory.Count == 0)
+            if (forwardHistory.IsEmpty)
             {
                 return;
             }
 
             string? current = CurrentDirectory;
-            string? target = forwardHistory.Pop();
+            forwardHistory = forwardHistory.Pop(out string? target);
             if (Navigate(target, record: false))
             {
-                backHistory.Push(current);
+                backHistory = backHistory.Push(current);
             }
         }
 
         private void ToggleHidden()
         {
             showHidden = !showHidden;
-            state.ShowHiddenFiles = showHidden;
             interacted = true;
             RefreshView();
         }
@@ -1011,15 +1011,13 @@ namespace RayGui_cs
                 name = $"New folder ({i})";
             }
 
-            ShowPrompt(new Prompt("New Folder", "Folder name:", ["Create", "Cancel"], GuiIconName.FolderAdd, (button, text) =>
+            ShowPrompt(new PromptState
             {
-                if (button == 0)
-                {
-                    CreateFolder(text ?? string.Empty);
-                }
-            })
-            {
+                Kind = PromptKind.NewFolder,
+                Title = "New Folder",
+                Message = "Folder name:",
                 Text = name,
+                TextEditing = true,
             });
         }
 
@@ -1060,7 +1058,7 @@ namespace RayGui_cs
 
         #region Places
 
-        private sealed record Place(string Name, string? Path, GuiIconName Icon);
+        internal sealed record Place(string Name, string? Path, GuiIconName Icon);
 
         private void LoadPlaces()
         {
@@ -1127,6 +1125,7 @@ namespace RayGui_cs
 
         private void DrawPlaces(Rectangle area, bool input)
         {
+            List<Place> places = this.places ?? [];
             float contentHeight = places.Count * rowHeight;
             Rectangle content = ScrollContent(area, contentHeight, out float viewX);
             ScrollPanelResult panel = Gui.ScrollPanel(area, null, content, placesScroll);
@@ -1251,7 +1250,7 @@ namespace RayGui_cs
                 {
                     interacted = true;
                     StopEditing();
-                    selection.Clear();
+                    selection = selection.Clear();
                     SyncFileNameText();
                 }
             }
@@ -1429,10 +1428,9 @@ namespace RayGui_cs
             }
             else if (options.Multiselect && ctrl)
             {
-                if (!selection.Remove(entry.FullPath))
-                {
-                    selection.Add(entry.FullPath);
-                }
+                selection = selection.Contains(entry.FullPath)
+                    ? selection.Remove(entry.FullPath)
+                    : selection.Add(entry.FullPath);
                 anchorPath = entry.FullPath;
             }
             else
@@ -1462,8 +1460,7 @@ namespace RayGui_cs
 
         private void SelectOnly(string path)
         {
-            selection.Clear();
-            selection.Add(path);
+            selection = selection.Clear().Add(path);
             focusPath = path;
             anchorPath = path;
         }
@@ -1472,21 +1469,16 @@ namespace RayGui_cs
         {
             if (!keep)
             {
-                selection.Clear();
+                selection = selection.Clear();
             }
-            for (int i = Math.Min(from, to); i <= Math.Max(from, to); i++)
-            {
-                selection.Add(visible[i].FullPath);
-            }
+            int first = Math.Min(from, to);
+            selection = selection.Union(visible.GetRange(first, Math.Max(from, to) - first + 1).Select(e => e.FullPath));
         }
 
         private void SelectAll()
         {
             interacted = true;
-            foreach (FileEntry entry in visible)
-            {
-                selection.Add(entry.FullPath);
-            }
+            selection = selection.Union(visible.Select(e => e.FullPath));
             SyncFileNameText();
         }
 
@@ -1575,6 +1567,7 @@ namespace RayGui_cs
                 entries = [];
                 loadError = DescribeError(ex);
             }
+            loadedDirectory = CurrentDirectory;
             loadedWriteTime = GetWriteTime(CurrentDirectory);
             nextRefreshCheck = Raylib.GetTime() + RefreshSeconds;
             RefreshView();
@@ -1583,7 +1576,7 @@ namespace RayGui_cs
         // Rebuilds the visible list from the loaded entries, the filters and the sort order.
         private void RefreshView()
         {
-            FileFilter? filter = pattern ?? SelectedFilter;
+            FileFilter? filter = pattern is null ? SelectedFilter : new FileFilter(pattern, pattern);
             visible = entries.Where(e =>
                     (e.IsDrive || showHidden || !e.IsHidden)
                     && (!FolderMode || e.IsDirectory)
@@ -1591,9 +1584,10 @@ namespace RayGui_cs
                     && (searchText.Length == 0 || e.Name.Contains(searchText, StringComparison.CurrentCultureIgnoreCase)))
                 .ToList();
             visible.Sort(CompareEntries);
+            viewKey = ViewKeyNow;
 
             var visiblePaths = new HashSet<string>(visible.Select(e => e.FullPath), PathComparer);
-            selection.IntersectWith(visiblePaths);
+            selection = selection.Intersect(visiblePaths);
             if (focusPath is not null && !visiblePaths.Contains(focusPath))
             {
                 focusPath = null;
@@ -1768,7 +1762,6 @@ namespace RayGui_cs
             if (result.Active != filterIndex)
             {
                 filterIndex = result.Active;
-                state.FilterIndex = filterIndex;
                 pattern = null;
                 if (Mode == FileBrowserMode.Save)
                 {
@@ -1798,12 +1791,12 @@ namespace RayGui_cs
                 const string Label = "Open as read-only";
                 float boxSize = Math.Min(row.Height - 6, textSize + 6);
                 Rectangle box = new(x, row.Y + (row.Height - boxSize) / 2, boxSize, boxSize);
-                bool isChecked = Gui.CheckBox(box, Label, state.ReadOnlyChecked);
-                if (isChecked != state.ReadOnlyChecked)
+                bool isChecked = Gui.CheckBox(box, Label, readOnlyChecked);
+                if (isChecked != readOnlyChecked)
                 {
                     interacted = true;
                 }
-                state.ReadOnlyChecked = isChecked;
+                readOnlyChecked = isChecked;
                 x += boxSize + padding + Measure(Label) + padding * 2;
             }
 
@@ -1857,43 +1850,37 @@ namespace RayGui_cs
 
         #region Prompts
 
-        // A small modal window over the browser. OnClose receives the clicked button index, or -1 when closed, and the text.
-        private sealed class Prompt(string title, string message, string[] buttons, GuiIconName icon, Action<int, string?> onClose)
+        // Opens a small modal window over the browser, which blocks it until it is answered.
+        private void ShowPrompt(PromptState newPrompt)
         {
-            public string Title { get; } = title;
-            public string Message { get; } = message;
-            public string[] Buttons { get; } = buttons;
-            public GuiIconName Icon { get; } = icon;
-            public Action<int, string?> OnClose { get; } = onClose;
-            public int DefaultButton { get; set; }
-            public int CancelButton { get; init; } = -1;
-            public string? Text { get; set; }
-            public bool TextEditing { get; set; } = true;
-            public long OpenedFrame { get; set; }
-        }
-
-        private void ShowPrompt(Prompt newPrompt)
-        {
-            newPrompt.OpenedFrame = frame;
-            prompt = newPrompt;
+            prompt = newPrompt with { OpenedFrame = frame };
             filterOpen = false;
             drag = DragMode.None;
             StopEditing();
             ReleaseCursor();
         }
 
-        private void ClosePrompt(Prompt current, int button)
+        // Answers the prompt: button is the index of the clicked button, or -1 when the prompt was closed.
+        private void ClosePrompt(int button)
         {
-            if (prompt != current)
+            if (prompt is not { } current)
             {
                 return;
             }
-            // Cleared first so the callback can open another prompt.
+            // Cleared first so answering it can open another prompt.
             prompt = null;
-            current.OnClose(button, current.Text);
+            switch (current.Kind)
+            {
+                case PromptKind.ConfirmAccept when button == 0:
+                    acceptedPaths = [.. current.PendingPaths];
+                    break;
+                case PromptKind.NewFolder when button == 0:
+                    CreateFolder(current.Text ?? string.Empty);
+                    break;
+            }
         }
 
-        private void DrawPrompt(Prompt current)
+        private void DrawPrompt(PromptState current)
         {
             // The input that opened the prompt must not also answer it.
             bool acceptInput = frame > current.OpenedFrame && !locked;
@@ -1918,7 +1905,7 @@ namespace RayGui_cs
 
             if (Gui.WindowBox(box, current.Title))
             {
-                ClosePrompt(current, current.CancelButton);
+                ClosePrompt(-1);
                 return;
             }
 
@@ -1942,13 +1929,14 @@ namespace RayGui_cs
                 TextBoxResult result = Gui.TextBox(new Rectangle(textX, y, box.X + box.Width - padding * 2 - textX, controlHeight), text, TextMaxBytes, editing);
                 if (editing)
                 {
-                    current.Text = result.Text;
+                    current = current with { Text = result.Text };
                 }
                 if (acceptInput)
                 {
-                    current.TextEditing = result.IsEditing;
+                    current = current with { TextEditing = result.IsEditing };
                     submitted = wasEditing && !result.IsEditing && (Raylib.IsKeyPressed(KeyboardKey.Enter) || Raylib.IsKeyPressed(KeyboardKey.KpEnter));
                 }
+                prompt = current;
                 y += controlHeight + padding;
             }
 
@@ -1966,7 +1954,7 @@ namespace RayGui_cs
                 }
                 if (Gui.Button(buttonBounds, current.Buttons[i]))
                 {
-                    ClosePrompt(current, i);
+                    ClosePrompt(i);
                     return;
                 }
                 buttonX += buttonWidth + padding;
@@ -1980,16 +1968,16 @@ namespace RayGui_cs
 
             if (submitted || (!current.TextEditing && (Raylib.IsKeyPressed(KeyboardKey.Enter) || Raylib.IsKeyPressed(KeyboardKey.KpEnter))))
             {
-                ClosePrompt(current, current.DefaultButton);
+                ClosePrompt(current.DefaultButton);
             }
             else if (Raylib.IsKeyPressed(KeyboardKey.Escape))
             {
-                ClosePrompt(current, current.CancelButton);
+                ClosePrompt(-1);
             }
             else if (current.Buttons.Length > 1 && Raylib.IsKeyPressed(KeyboardKey.Tab) && !current.TextEditing)
             {
                 // raygui has no keyboard focus, so Tab moves the default between buttons.
-                current.DefaultButton = (current.DefaultButton + 1) % current.Buttons.Length;
+                prompt = current with { DefaultButton = (current.DefaultButton + 1) % current.Buttons.Length };
             }
         }
 

@@ -131,13 +131,13 @@ namespace RayGui_cs
                 {
                     if (options.OverwritePrompt)
                     {
-                        Confirm("Confirm Save As", $"{name} already exists.\nDo you want to replace it?", () => acceptedPaths = paths);
+                        ConfirmAccept("Confirm Save As", $"{name} already exists.\nDo you want to replace it?", paths);
                         return;
                     }
                 }
                 else if (options.CreatePrompt)
                 {
-                    Confirm("Create File", $"{name} doesn't exist.\nDo you want to create it?", () => acceptedPaths = paths);
+                    ConfirmAccept("Create File", $"{name} doesn't exist.\nDo you want to create it?", paths);
                     return;
                 }
             }

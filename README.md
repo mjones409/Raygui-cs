@@ -106,31 +106,27 @@ raygui has no file dialog, so Raygui-cs includes one written in C# on top of ray
 
 The dialog window can be moved and resized. It has back, forward, up and refresh buttons, an editable address bar, search, a hidden files toggle and a new folder button. The file list can be sorted by column. The places list shows known folders, custom places and drives. The dialogs also have filter and read-only controls, confirmation prompts and keyboard support: arrows, Enter, Backspace, Alt+arrows, Ctrl+A, Ctrl+L, Ctrl+F, Ctrl+H, F5, Ctrl+Shift+N, type-ahead and Escape.
 
-Each dialog takes three things every frame:
+Each dialog is one struct and one function: `OpenFileDialog`, `SaveFileDialog` or `FolderBrowserDialog`, drawn by `Gui.OpenFileDialog`, `Gui.SaveFileDialog` or `Gui.FolderBrowserDialog`. The struct is the whole dialog: its options, everything it remembers between frames, and what the user did this frame. Keep it in a nullable field, where null means the dialog is closed, and pass it through the function every frame:
 
-- **Bounds**, like any other control. `Gui.GetFileDialogBounds()` returns centered bounds sized for the current style. The user can move and resize the dialog, and the result's `Bounds` gives you the new bounds to pass back in on the next frame.
-- **A `FileDialogState`**, which holds everything the dialog remembers between frames: the folder, history, selection, scroll position and prompts. Create one when the dialog opens, and drop it once the dialog is dismissed. Its constructor takes the folder to open and an initial file name (for the folder dialog, the folder to select). The state also exposes `CurrentDirectory`, `FilterIndex` (zero based), `ReadOnlyChecked` and `ShowHiddenFiles`.
-- **Options**, as a struct: `OpenFileDialogOptions`, `SaveFileDialogOptions` or `FolderBrowserDialogOptions`. They use the WinForms names and defaults (`Filter`, `Multiselect`, `DefaultExt`, `AddExtension`, `CheckFileExists`, `OverwritePrompt`, `CreatePrompt`, `ShowReadOnly`, `ShowPinnedPlaces`, `CustomPlaces`, `OkRequiresInteraction`, `Description`, `ShowNewFolderButton`, ...). `default` has the same defaults as `new()`, so you can leave the options out.
+```csharp
+dialog = Gui.OpenFileDialog(dialog);
+```
 
-Each call returns a `FileDialogResult`:
+The options use the WinForms names and defaults (`Filter`, `FilterIndex`, `Multiselect`, `DefaultExt`, `AddExtension`, `CheckFileExists`, `OverwritePrompt`, `CreatePrompt`, `ShowReadOnly`, `ShowPinnedPlaces`, `CustomPlaces`, `OkRequiresInteraction`, `Description`, `ShowNewFolderButton`, ...), and can change from frame to frame. `default` has the same defaults as `new()`.
 
-- **`Paths`** holds the accepted files or folders on the frame the user accepts the dialog.
-- **`Canceled`** is true on the frame the user cancels it, with Cancel, the close button or Escape.
-- **`IsDismissed`** is true in either case.
-- **`HelpClicked`** is true on the frame the user clicks the Help button.
+Each struct also carries:
 
-The dialog never closes itself: stop drawing it once the result is dismissed. To reject the accepted files, keep drawing it.
+- **`Bounds`**, like any other control, except that empty bounds center the dialog at a size that suits the style. The user can move and resize the dialog, which updates `Bounds`.
+- **`FileName` and `FileNames`** (`SelectedPath` and `SelectedPaths` for folders). Set the first before the dialog opens to type a name into it; both hold the full paths the user accepted afterwards.
+- **`Accepted`**, true on the frame the user accepts the dialog, and **`Canceled`**, true on the frame the user cancels it with Cancel, the close button or Escape. **`Closed`** is true in either case, and **`HelpClicked`** is true on the frame the user clicks the Help button.
+- **`State`**, the dialog's working state: the folder, history, selection, scroll positions, text boxes and prompt. Most programs never touch it; it is public so that you can save and restore a dialog, or drive it from code.
+
+The dialog never closes itself: stop drawing it, usually by setting your field to null, once `Closed` is true. To reject the accepted files instead, keep drawing it.
 
 Draw the dialog after the rest of your UI, and lock the rest of your UI while the dialog is open:
 
 ```csharp
-var imageFiles = new OpenFileDialogOptions
-{
-    Filter = "Images (*.png, *.jpg)|*.png;*.jpg|All files (*.*)|*.*",
-    Multiselect = true,
-};
-FileDialogState? openState = null; // null while the dialog is closed
-Rectangle openBounds = default;
+OpenFileDialog? openDialog = null; // null while the dialog is closed
 string? lastFolder = null;
 Raylib.SetExitKey(KeyboardKey.Null); // otherwise Escape also closes the window
 
@@ -139,27 +135,28 @@ while (!Raylib.WindowShouldClose())
     Raylib.BeginDrawing();
     Raylib.ClearBackground(GuiStyle.GetColor(GuiDefaultProperty.BackgroundColor));
 
-    Gui.IsLocked = openState is not null;
+    Gui.IsLocked = openDialog is not null;
     if (Gui.Button(new Rectangle(10, 10, 120, 30), "Open..."))
     {
-        openState = new FileDialogState(lastFolder);
-        openBounds = Gui.GetFileDialogBounds();
+        openDialog = new OpenFileDialog
+        {
+            Title = "Open image",
+            Filter = "Images (*.png, *.jpg)|*.png;*.jpg|All files (*.*)|*.*",
+            Multiselect = true,
+            InitialDirectory = lastFolder,
+        };
     }
     Gui.IsLocked = false;
 
-    if (openState is not null)
+    if (openDialog is OpenFileDialog dialog)
     {
-        FileDialogResult result = Gui.OpenFileDialog(openBounds, "Open image", openState, imageFiles);
-        openBounds = result.Bounds;
-        if (result.Paths is { } files)
+        dialog = Gui.OpenFileDialog(dialog);
+        if (dialog.Accepted)
         {
-            Load(files);
-            lastFolder = openState.CurrentDirectory;
+            Load(dialog.FileNames);
+            lastFolder = dialog.State.CurrentDirectory;
         }
-        if (result.IsDismissed)
-        {
-            openState = null;
-        }
+        openDialog = dialog.Closed ? null : dialog;
     }
 
     Raylib.EndDrawing();
@@ -171,8 +168,8 @@ A dialog ignores input on its first frame, so the click that opened it can't als
 Differences from WinForms:
 
 - `.lnk` shortcuts aren't resolved (symbolic links are).
-- There are no events: accepted files come back in the result instead of through `FileOk`, and `HelpClicked` replaces `HelpRequest`.
-- To reopen a dialog where the user left it, pass the old state's `CurrentDirectory` to the new state. `ClientGuid` doesn't exist.
+- There are no events: accepted files come back in the struct instead of through `FileOk`, and `HelpClicked` replaces `HelpRequest`.
+- To reopen a dialog where the user left it, pass the old dialog's `State.CurrentDirectory` as the new dialog's `InitialDirectory`. `ClientGuid` doesn't exist.
 - `ShowDialog`, `RestoreDirectory`, `AddToRecent` and `AutoUpgradeEnabled` don't exist.
 
 ## Migrating from earlier versions

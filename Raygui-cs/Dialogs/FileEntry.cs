@@ -1,3 +1,4 @@
+using Raylib_cs;
 using System.Globalization;
 
 namespace RayGui_cs
@@ -9,9 +10,16 @@ namespace RayGui_cs
         Folder,
     }
 
-    // The public dialog options, in one shape for the browser; passed in every frame.
+    // What the browser reads from the public dialog struct each frame: the options, and the values the user can change.
     internal readonly struct FileBrowserOptions
     {
+        public Rectangle Bounds { get; init; }
+        public string? InitialDirectory { get; init; }
+        public string? InitialFileName { get; init; }
+        public int FilterIndex { get; init; }
+        public bool ReadOnlyChecked { get; init; }
+        public bool ShowHiddenFiles { get; init; }
+
         public required string Title { get; init; }
         public string? Description { get; init; }
         public required string OkText { get; init; }
@@ -37,6 +45,20 @@ namespace RayGui_cs
         public bool CheckWriteAccess { get; init; }
         public bool OverwritePrompt { get; init; }
         public bool CreatePrompt { get; init; }
+    }
+
+    // What the browser gives back to the public dialog struct each frame.
+    internal readonly struct FileBrowserResult
+    {
+        public required Rectangle Bounds { get; init; }
+        public int FilterIndex { get; init; }
+        public bool ReadOnlyChecked { get; init; }
+        public bool ShowHiddenFiles { get; init; }
+
+        // The paths accepted this frame, or null for none.
+        public string[]? Paths { get; init; }
+        public bool Canceled { get; init; }
+        public bool HelpClicked { get; init; }
     }
 
     // A file, folder or drive shown in the browser.

@@ -71,17 +71,4 @@ namespace RayGui_cs
         /// <summary>True when the user clicked a button or closed the box.</summary>
         public bool IsDismissed => ClickedButton.HasValue || Closed;
     }
-
-    /// <summary>Result of <see cref="Gui.OpenFileDialog"/>, <see cref="Gui.SaveFileDialog"/> and <see cref="Gui.FolderBrowserDialog"/>.</summary>
-    /// <param name="Bounds">The dialog bounds after the user moved or resized it, to pass back in on the next frame.</param>
-    /// <param name="Paths">The full paths of the files or folders the user accepted this frame, or null for none.</param>
-    /// <param name="Canceled">True when the user canceled the dialog this frame, with Cancel, the close button or Escape.</param>
-    public readonly record struct FileDialogResult(Rectangle Bounds, IReadOnlyList<string>? Paths, bool Canceled)
-    {
-        /// <summary>True when the Help button was clicked this frame.</summary>
-        public bool HelpClicked { get; init; }
-
-        /// <summary>True when the user accepted or canceled the dialog.</summary>
-        public bool IsDismissed => Paths is not null || Canceled;
-    }
 }
