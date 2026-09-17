@@ -29,7 +29,6 @@ namespace RayGui_cs
             OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
         private readonly FileBrowserOptions options;
-        private readonly Cache cache;
         private bool initialized;
 
         // Loaded from the options, and given back so the caller sees what the user changed.

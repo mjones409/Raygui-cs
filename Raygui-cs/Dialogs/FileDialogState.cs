@@ -254,7 +254,19 @@ namespace RayGui_cs
         public double TooltipStart { get; set; }
 
         // What the dialog loaded from the disk and the options: the folder listing, the sorted and filtered view, the parsed
-        // filters and the places. Every entry records what it was built from and is rebuilt when that changes.
-        internal FileBrowser.Cache? Cache { get; set; }
+        // filters and the places, with what each was built from so the dialog can tell when to load or rebuild it. These are
+        // internal because a caller changes the values above instead. The lists are replaced, never changed, so copies of a
+        // state stay independent.
+        internal string? LoadedDirectory;
+        internal List<FileEntry>? Entries;
+        internal string? LoadError;
+        internal DateTime LoadedWriteTime;
+        internal double NextRefreshCheck;
+        internal List<FileEntry>? Visible;
+        internal FileBrowser.ViewKey ViewKey;
+        internal string? LoadedFilter;
+        internal FileFilter[]? Filters;
+        internal FileDialogCustomPlace[]? LoadedCustomPlaces;
+        internal List<FileBrowser.Place>? Places;
     }
 }

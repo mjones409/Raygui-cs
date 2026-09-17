@@ -8,27 +8,8 @@ namespace RayGui_cs
     // into fields at the start of the frame and stored back at the end.
     internal sealed partial class FileBrowser
     {
-        // What the dialog loaded from the disk and the options. Each part records what it was built from, so a caller that
-        // changes the state, such as the folder or the sort order, gets a rebuilt view on the next frame.
-        internal sealed class Cache
-        {
-            public string? Directory;
-            public List<FileEntry> Entries = [];
-            public string? LoadError;
-            public DateTime WriteTime;
-            public double NextRefreshCheck;
-
-            public List<FileEntry> Visible = [];
-            public ViewKey View;
-
-            public string? FilterSource;
-            public FileFilter[] Filters = [];
-
-            public FileDialogCustomPlace[] CustomPlaces = [];
-            public List<Place>? Places;
-        }
-
-        // What the visible list was built from.
+        // What the visible list was built from, so a caller that changes the state, such as the folder or the sort order,
+        // gets a rebuilt view on the next frame.
         internal readonly record struct ViewKey(
             List<FileEntry> Entries,
             FileFilter[] Filters,
@@ -43,7 +24,6 @@ namespace RayGui_cs
         {
             Mode = mode;
             this.options = options;
-            cache = state.Cache ?? new Cache();
             Load(state);
         }
 
@@ -106,17 +86,17 @@ namespace RayGui_cs
             showHidden = options.ShowHiddenFiles;
             readOnlyChecked = options.ReadOnlyChecked;
 
-            loadedDirectory = cache.Directory;
-            entries = cache.Entries;
-            loadError = cache.LoadError;
-            loadedWriteTime = cache.WriteTime;
-            nextRefreshCheck = cache.NextRefreshCheck;
-            visible = cache.Visible;
-            viewKey = cache.View;
-            loadedFilter = cache.FilterSource;
-            filters = cache.Filters;
-            loadedCustomPlaces = cache.CustomPlaces;
-            places = cache.Places;
+            loadedDirectory = state.LoadedDirectory;
+            entries = state.Entries ?? [];
+            loadError = state.LoadError;
+            loadedWriteTime = state.LoadedWriteTime;
+            nextRefreshCheck = state.NextRefreshCheck;
+            visible = state.Visible ?? [];
+            viewKey = state.ViewKey;
+            loadedFilter = state.LoadedFilter;
+            filters = state.Filters ?? [];
+            loadedCustomPlaces = state.LoadedCustomPlaces ?? [];
+            places = state.Places;
         }
 
         private void Store(ref FileDialogState state)
@@ -159,18 +139,17 @@ namespace RayGui_cs
             state.LastTooltip = lastTooltip;
             state.TooltipStart = tooltipStart;
 
-            cache.Directory = loadedDirectory;
-            cache.Entries = entries;
-            cache.LoadError = loadError;
-            cache.WriteTime = loadedWriteTime;
-            cache.NextRefreshCheck = nextRefreshCheck;
-            cache.Visible = visible;
-            cache.View = viewKey;
-            cache.FilterSource = loadedFilter;
-            cache.Filters = filters;
-            cache.CustomPlaces = loadedCustomPlaces;
-            cache.Places = places;
-            state.Cache = cache;
+            state.LoadedDirectory = loadedDirectory;
+            state.Entries = entries;
+            state.LoadError = loadError;
+            state.LoadedWriteTime = loadedWriteTime;
+            state.NextRefreshCheck = nextRefreshCheck;
+            state.Visible = visible;
+            state.ViewKey = viewKey;
+            state.LoadedFilter = loadedFilter;
+            state.Filters = filters;
+            state.LoadedCustomPlaces = loadedCustomPlaces;
+            state.Places = places;
         }
     }
 }
