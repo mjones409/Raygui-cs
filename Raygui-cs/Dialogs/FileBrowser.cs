@@ -59,7 +59,7 @@ namespace RayGui_cs
         private double nextRefreshCheck;
 
         // Selection, by full path so it survives sorting and refreshing.
-        private ImmutableHashSet<string> selection = ImmutableHashSet.Create(PathComparer);
+        private ImmutableHashSet<string> selection = ImmutableHashSet.Create<string>(PathComparer);
         private string? focusPath;
         private string? anchorPath;
         private string? lastClickPath;
