@@ -11,7 +11,7 @@
        Not "Raygui-cs", which is an unrelated package on nuget.org. -->
   <PropertyGroup>
     <PackageId>Raygui-cs.Local</PackageId>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Authors>mjones409</Authors>
     <Description>raygui 5.0 bindings for Raylib-cs, including the native win-x64 raygui library.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>

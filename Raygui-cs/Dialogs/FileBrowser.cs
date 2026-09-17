@@ -131,6 +131,9 @@ namespace RayGui_cs
 
         private bool FolderMode => Mode == FileBrowserMode.Folder;
 
+        // Whether choosing the entry means accepting it, rather than opening the folder it is.
+        private bool CanAccept(FileEntry entry) => entry.IsDirectory ? FolderMode || options.AllowFolders : !FolderMode;
+
         private bool AnyEditing => fileNameEditing || addressEditing || searchEditing;
 
         #region Public operations
@@ -1519,7 +1522,7 @@ namespace RayGui_cs
             }
 
             List<string> names = SelectedEntries
-                .Where(e => e.IsDirectory == FolderMode)
+                .Where(CanAccept)
                 .Select(e => e.IsDrive ? e.FullPath : e.Name)
                 .ToList();
             if (names.Count == 0)
@@ -1705,7 +1708,7 @@ namespace RayGui_cs
         // Draws the file name row and returns the bounds for the filter dropdown, which is drawn last.
         private Rectangle DrawNameRow(Rectangle row)
         {
-            string label = FolderMode ? "Folder:" : "File name:";
+            string label = FolderMode ? "Folder:" : options.AllowFolders ? "Name:" : "File name:";
             float labelWidth = Measure(label);
             DrawText(label, row.X, CenterTextY(row), StyleColor(GuiControl.Label, GuiControlProperty.TextColorNormal));
 

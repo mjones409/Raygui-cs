@@ -114,6 +114,8 @@ dialog = Gui.OpenFileDialog(dialog);
 
 The options use the WinForms names and defaults (`Filter`, `FilterIndex`, `Multiselect`, `DefaultExt`, `AddExtension`, `CheckFileExists`, `OverwritePrompt`, `CreatePrompt`, `ShowReadOnly`, `ShowPinnedPlaces`, `CustomPlaces`, `OkRequiresInteraction`, `Description`, `ShowNewFolderButton`, ...), and can change from frame to frame. `default` has the same defaults as `new()`.
 
+To choose files and folders in one dialog, set `OpenFileDialog.AllowFolders`: a chosen folder is then accepted instead of opened, and comes back in `FileNames` with the files. Folders are still opened by double clicking them or pressing Enter on them, so browsing works as usual.
+
 Each struct also carries:
 
 - **`Bounds`**, like any other control, except that empty bounds center the dialog at a size that suits the style. The user can move and resize the dialog, which updates `Bounds`.

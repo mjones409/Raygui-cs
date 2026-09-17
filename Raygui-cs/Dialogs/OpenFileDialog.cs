@@ -126,6 +126,12 @@ namespace RayGui_cs
         /// <summary>Gets or sets whether the user can select more than one file.</summary>
         public bool Multiselect { get; set; }
 
+        /// <summary>
+        /// Gets or sets whether a chosen folder is accepted instead of opened, so one dialog can return both files and folders.
+        /// Folders are still opened by double clicking them or pressing Enter on them.
+        /// </summary>
+        public bool AllowFolders { get; set; }
+
         /// <summary>Gets or sets whether the dialog has an "Open as read-only" check box, kept in <see cref="ReadOnlyChecked"/>.</summary>
         public bool ShowReadOnly { get; set; }
 
@@ -198,6 +204,7 @@ namespace RayGui_cs
                 Filter = Filter,
                 FilterIndex = FilterIndex,
                 Multiselect = Multiselect,
+                AllowFolders = AllowFolders,
                 ShowReadOnly = ShowReadOnly,
                 ReadOnlyChecked = ReadOnlyChecked,
                 ShowHelp = ShowHelp,

@@ -52,8 +52,9 @@ namespace RayGui_cs
                     return;
                 }
 
+                // A folder is opened, unless the dialog accepts folders, where it is what the user chose.
                 string? full = ResolvePath(name);
-                if (full is not null && Directory.Exists(full))
+                if (full is not null && !options.AllowFolders && Directory.Exists(full))
                 {
                     fileNameText = string.Empty;
                     Navigate(full);
@@ -274,7 +275,13 @@ namespace RayGui_cs
             }
             if (Directory.Exists(full))
             {
-                return $"{Path.GetFileName(full)}\nThis is a folder. Select a file instead.";
+                if (!options.AllowFolders)
+                {
+                    return $"{Path.GetFileName(full)}\nThis is a folder. Select a file instead.";
+                }
+                // A folder is taken as it is: the checks below are about files.
+                path = Path.TrimEndingDirectorySeparator(full);
+                return null;
             }
 
             if (options.AddExtension)

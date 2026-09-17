@@ -24,6 +24,8 @@ namespace RayGui_cs
         public string? Description { get; init; }
         public required string OkText { get; init; }
         public bool Multiselect { get; init; }
+        // Whether the file dialogs accept a chosen folder instead of only opening it.
+        public bool AllowFolders { get; init; }
         public string? Filter { get; init; }
         public bool DimBackground { get; init; }
         public bool ShowNewFolderButton { get; init; }
